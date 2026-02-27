@@ -6,15 +6,19 @@ models to run: Qwen/Qwen3-VL-4B-Instruct, Qwen/Qwen2.5-VL-3B-Instruct
 
 from datasets import load_dataset
 from tqdm import tqdm
-from transformers import AutoProcessor, AutoModelForImageTextToText
+from transformers import AutoProcessor, AutoModelForImageTextToText, Pix2StructProcessor, Pix2StructForConditionalGeneration
 import argparse
 import math
 import re
 import torch
 
 def load_model_and_processor(model_name):
-    processor = AutoProcessor.from_pretrained(model_name)
-    model = AutoModelForImageTextToText.from_pretrained(model_name, dtype=torch.float16, device_map="auto")
+    if model_name == "google/matcha-chartqa":
+        processor = Pix2StructProcessor.from_pretrained(model_name)
+        model = Pix2StructForConditionalGeneration.from_pretrained(model_name)
+    else:
+        processor = AutoProcessor.from_pretrained(model_name)
+        model = AutoModelForImageTextToText.from_pretrained(model_name, dtype=torch.float16, device_map="auto")
     return model, processor
 
 def load_hf_dataset(dataset_name):
@@ -56,14 +60,20 @@ def create_message(question, image, examples, answer=None):
         ]
 
 def generate_answer(question, image, model, processor, examples):
-    message = create_message(question, image, examples)
-    prompt = processor.apply_chat_template(message, tokenize=False, add_generation_prompt=True)
+    try:
+        message = create_message(question, image, examples)
+        prompt = processor.apply_chat_template(message, tokenize=False, add_generation_prompt=True)
+    except:
+        prompt = question
 
     inputs = processor(text=[prompt], images=[ex["image"] for ex in examples]+[image], return_tensors="pt")
     inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
     gen = model.generate(**inputs, max_new_tokens=32, do_sample=False)
-    return processor.tokenizer.decode(gen[0][inputs["input_ids"].shape[-1]:], skip_special_tokens=True).strip()
+    try:
+        return processor.tokenizer.decode(gen[0][inputs["input_ids"].shape[-1]:], skip_special_tokens=True).strip()
+    except:
+        return processor.decode(gen[0], skip_special_tokens=True).strip()
 
 def normalize_answer(s):
     s = str(s).lower().strip()

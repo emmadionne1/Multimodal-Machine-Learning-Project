@@ -1,0 +1,13 @@
+// Folders
+__pycache__/
+node_modules/
+slurm/
+.ipynb_checkpoints/
+.conda/
+
+// Miscellaneous files
+*.csv
+*.tsv
+data/
+*.json
+*.jsonl
