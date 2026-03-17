@@ -7,10 +7,13 @@ models to run: any text LLM, e.g. Qwen/Qwen3-4B-Instruct-2507
 from datasets import load_dataset
 from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModelForCausalLM
+from multimodal_prompting_baselines import levenshtein_distance, load_hf_dataset, extract_answer, safe_name, normalize_answer, is_text_answer, is_answer_correct_relaxed, is_answer_correct_exact
 import argparse
-import math
 import re
 import torch
+import os
+import csv
+from datetime import datetime
 
 def load_model_and_tokenizer(model_name):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -23,10 +26,6 @@ def load_model_and_tokenizer(model_name):
         device_map="auto" if torch.cuda.is_available() else None,
     )
     return model, tokenizer
-
-def load_hf_dataset(dataset_name):
-    # dataset: https://huggingface.co/datasets/HuggingFaceM4/ChartQA
-    return load_dataset(dataset_name)
 
 def get_fewshot_examples(dataset):
     examples = []
@@ -55,7 +54,7 @@ def create_prompt(question, examples, answer=None):
 
     return "\n".join(parts)
 
-def generate_answer(question, model, tokenizer, examples):
+def generate_answer(question, model, tokenizer, examples, max_new_tokens=32):
     prompt = create_prompt(question, examples)
 
     inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
@@ -63,82 +62,118 @@ def generate_answer(question, model, tokenizer, examples):
 
     gen = model.generate(
         **inputs,
-        max_new_tokens=32,
+        max_new_tokens=max_new_tokens,
         do_sample=False,
         pad_token_id=tokenizer.pad_token_id,
         eos_token_id=tokenizer.eos_token_id,
     )
 
-    # decode only newly generated tokens (like your VLM code tries to do)
     new_tokens = gen[0][inputs["input_ids"].shape[-1]:]
+    if new_tokens.numel() == 0:
+        return ""
+
     text = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
-    return text
+    return extract_answer(text)
 
-def normalize_answer(s):
-    s = str(s).lower().strip()
-    s = re.sub(r"\s+", " ", s)
-    return s
+def run_eval(model, tokenizer, eval_dataset, examples, model_name, dataset_name, split_name, experiment_type, max_new_tokens=32, print_n=20, print_every=0, out_dir="preds"):
+    correct_relaxed, correct_exact, total = 0.0, 0.0, 0
+    n_empty = 0
 
-def to_float(s):
-    s = str(s).replace(",", "").strip()
-    if s.endswith("%"):
-        try:
-            return float(s[:-1]) / 100.0
-        except:
-            return None
-    try:
-        return float(s)
-    except:
-        return None
+    lev_sum = 0.0
+    lev_n = 0
 
-def is_answer_correct(pred, gold):
-    pred_norm, gold_norm = normalize_answer(pred), normalize_answer(gold)
-    pred_num, gold_num = to_float(pred_norm), to_float(gold_norm)
+    os.makedirs(out_dir, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    fname = f"preds_{safe_name(dataset_name)}_{safe_name(split_name)}_{safe_name(experiment_type)}_{safe_name(model_name)}_k{len(examples)}_t{max_new_tokens}_{ts}.csv"
+    path = os.path.join(out_dir, fname)
 
-    # numerical: 5% diff allowed
-    if pred_num is not None and gold_num is not None:
-        if math.isclose(gold_num, 0.0):
-            return 1.0 if math.isclose(pred_num, 0.0) else 0.0
-        rel_err = abs(pred_num - gold_num) / abs(gold_num)
-        return float(rel_err <= 0.05)
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["idx", "question", "gold", "pred", "relaxed_correct", "exact_correct", "is_text", "levenshtein"])
 
-    # non-numerical: needs an exact string match, case insensitive
-    return float(pred_norm == gold_norm)
+        for i, ex in enumerate(tqdm(eval_dataset)):
+            pred = generate_answer(ex["query"], model, tokenizer, examples, max_new_tokens=max_new_tokens)
+            gold = str(ex["label"][0]).strip()
 
-def run_eval(model, tokenizer, eval_dataset, examples):
-    correct, total = 0, 0
-    for ex in tqdm(eval_dataset):
-        pred = generate_answer(ex["query"], model, tokenizer, examples)
-        correct += is_answer_correct(pred, ex["label"][0])
-        total += 1
-    print(f"Relaxed accuracy: {correct/total}")
+            c_relaxed = is_answer_correct_relaxed(pred, gold)
+            c_exact = is_answer_correct_exact(pred, gold)
+
+            if pred == "":
+                n_empty += 1
+
+            correct_relaxed += c_relaxed
+            correct_exact += c_exact
+            total += 1
+
+            is_text = is_text_answer(pred, gold)
+            lev = ""
+            if is_text:
+                lev = levenshtein_distance(normalize_answer(pred), normalize_answer(gold))
+                lev_sum += lev
+                lev_n += 1
+
+            w.writerow([i, ex["query"], gold, pred, c_relaxed, c_exact, int(is_text), lev])
+
+            if i < print_n or (print_every and (i + 1) % print_every == 0):
+                print(f"\n[{i}]")
+                print(f"Q: {ex['query']}")
+                print(f"GOLD: {gold}")
+                print(f"PRED: {pred}")
+                print(f"EMPTY: {int(pred == '')}")
+                print(f"RELAXED_CORRECT: {int(c_relaxed)}")
+                print(f"EXACT_CORRECT: {int(c_exact)}")
+                if is_text:
+                    print(f"LEV: {lev}")
+                print(f"RUNNING_RELAXED_ACC: {correct_relaxed/total:.4f}")
+                print(f"RUNNING_EXACT_ACC: {correct_exact/total:.4f}")
+                if lev_n > 0:
+                    print(f"RUNNING_LEV_AVG: {lev_sum/lev_n:.4f}")
+                print(f"N_EMPTY: {n_empty}")
+
+    relaxed_acc = correct_relaxed / max(total, 1)
+    exact_acc = correct_exact / max(total, 1)
+    lev_avg = (lev_sum / lev_n) if lev_n > 0 else float("nan")
+
+    print(f"Relaxed accuracy: {relaxed_acc:.4f}")
+    print(f"Exact accuracy: {exact_acc:.4f}")
+    print(f"Levenshtein avg (text only): {lev_avg:.4f}")
+    print(f"Empty preds: {n_empty}/{total}")
+    print(f"Saved: {path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--experiment_type", type=str, required=True, choices=['zero', 'few'])
     parser.add_argument("--model_name", type=str, default="Qwen/Qwen3-4B-Instruct-2507")
     parser.add_argument("--dataset_name", type=str, default="HuggingFaceM4/ChartQA")
+    parser.add_argument("--max_new_tokens", type=int, default=32)
+    parser.add_argument("--print_n", type=int, default=20)
+    parser.add_argument("--print_every", type=int, default=0)
+    parser.add_argument("--out_dir", type=str, default="preds")
     args = parser.parse_args()
 
-    # set up experiment parameters
     EXPERIMENT_TYPE = args.experiment_type
     MODEL_NAME = args.model_name
     DATASET_NAME = args.dataset_name
+    MAX_NEW_TOKENS = args.max_new_tokens
 
-    # load model, tokenizer
     model, tokenizer = load_model_and_tokenizer(MODEL_NAME)
     model.eval()
 
-    # load val dataset, fewshot examples
     dataset = load_hf_dataset(DATASET_NAME)
-    if "val" in dataset:
-        ds = dataset["val"]
-    elif "validation" in dataset:
-        ds = dataset["validation"]
-    else:
-        ds = dataset["test"]
-
+    ds = dataset["val"]
     examples = get_fewshot_examples(ds) if EXPERIMENT_TYPE == "few" else []
 
-    # compute relaxed accuracy over dataset
-    run_eval(model, tokenizer, ds, examples)
+    run_eval(
+        model,
+        tokenizer,
+        ds,
+        examples,
+        model_name=MODEL_NAME,
+        dataset_name=DATASET_NAME,
+        split_name="val",
+        experiment_type=EXPERIMENT_TYPE,
+        max_new_tokens=MAX_NEW_TOKENS,
+        print_n=args.print_n,
+        print_every=args.print_every,
+        out_dir=args.out_dir
+    )
