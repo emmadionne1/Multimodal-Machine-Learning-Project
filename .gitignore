@@ -4,6 +4,8 @@ node_modules/
 slurm/
 .ipynb_checkpoints/
 .conda/
+outputs/
+wandb/
 
 // Miscellaneous files
 *.csv
@@ -11,3 +13,4 @@ slurm/
 data/
 *.json
 *.jsonl
+config.py

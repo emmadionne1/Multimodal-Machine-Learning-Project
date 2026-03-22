@@ -9,7 +9,9 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --time=10:00:00
 #SBATCH --mem=32G
-#SBATCH --gpus=2
+#SBATCH --gpus=4
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
 
 case "$SLURM_ARRAY_TASK_ID" in
   1)
