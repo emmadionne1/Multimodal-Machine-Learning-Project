@@ -16,6 +16,7 @@ from PIL import Image
 import matplotlib.pyplot as plt
 from transformers import AutoProcessor, AutoModel, AutoTokenizer, AutoModelForCausalLM, Trainer, TrainingArguments, TrainerCallback
 import torch
+import os
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 SEED = 8
@@ -88,6 +89,17 @@ def load_language_model(language_model_name):
         tokenizer.pad_token = tokenizer.eos_token
     llm = AutoModelForCausalLM.from_pretrained(language_model_name, dtype=torch.bfloat16, trust_remote_code=True)
     return llm, tokenizer
+
+class MLPTrainer(Trainer):
+    def _save_checkpoint(self, model, trial, metrics=None):
+        checkpoint_folder = f"mlp_step_{self.state.global_step}"
+        output_dir = os.path.join(self.args.output_dir, checkpoint_folder)
+        os.makedirs(output_dir, exist_ok=True)
+
+        torch.save({
+            "mlp": model.projector.state_dict(),
+            "trainer_state": self.state,
+        }, os.path.join(output_dir, "projector.pt"))
 
 class Qwen3VLProjector(torch.nn.Module):
     def __init__(self, vision_dim, llm_dim, spatial_merge_size):
@@ -362,9 +374,10 @@ if __name__ == "__main__":
     model = CustomVLM(vision_model, processor, language_model, tokenizer, proj_layer, image_token_id)
     model.freeze_backbones()
     collator = CustomVLMCollator(tokenizer, processor, image_root)
+    output_dir=f"./outputs/{EXPERIMENT_NAME}"
 
     training_args = TrainingArguments(
-        output_dir=f"./outputs/{EXPERIMENT_NAME}",
+        output_dir=output_dir,
         per_device_train_batch_size=8,
         per_device_eval_batch_size=16,
         gradient_accumulation_steps=4,
@@ -379,10 +392,13 @@ if __name__ == "__main__":
         report_to="wandb",
         lr_scheduler_type="cosine",
         warmup_ratio=0.03,
-        seed=SEED
+        seed=SEED,
+        save_strategy="steps",
+        save_steps=50,
+        save_total_limit=1
     )
 
-    trainer = Trainer(
+    trainer = MLPTrainer(
         model=model,
         args=training_args,
         train_dataset=ds["train"],
@@ -395,6 +411,11 @@ if __name__ == "__main__":
     # not resuming from checkpoint, as we're only saving the proj layer weights
     # we cant simply just load those, we'd need to save the scheduler, optim states too and im lazy
     print("beginning training!")
+    # TODO: need to fix the path and only load if it exists in the directory
+    ckpt = torch.load(f"{output_dir}/projector.pt")
+    model.mlp.load_state_dict(ckpt["projector"])
+    trainer.state = ckpt["trainer_state"]
+
     trainer.train()
     print("finished training!")
 
