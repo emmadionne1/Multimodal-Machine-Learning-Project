@@ -6,6 +6,7 @@ from pathlib import Path
 import zipfile
 import evaluate
 import wandb
+import os
 import config
 import numpy as np
 import argparse
@@ -21,7 +22,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 SEED = 8
 bleu = evaluate.load("bleu")
 
-def create_dataset(overfit_check=False):
+def create_dataset(overfit_check=False, dataset_num_splits=5, dataset_split_index=0):
     # step 1: download the snapshots directly rather than let HF do it
     # also only download some of the files because there was this weird column mismatch thing happening
     snapshot_dir = Path(snapshot_download(
@@ -56,13 +57,23 @@ def create_dataset(overfit_check=False):
     }, remove_columns=["id", "conversations"])
     print(ds[0])
 
-    # step 5: optional maybe, lets split up into train/eval/test
+    # step 5: split up into train/eval/test
     split_1 = ds.train_test_split(test_size=0.10, seed=SEED, shuffle=True)
     split_2 = split_1["test"].train_test_split(test_size=0.50, seed=SEED, shuffle=True)
     ds = DatasetDict({"train": split_1["train"], "eval": split_2["train"], "test": split_2["test"]})
     print(ds)
 
-    # step 6: for debugging only
+    # step 6a: split up into chunks if requested
+    if dataset_split_index >= 0 and dataset_split_index < dataset_num_splits:
+        train_len = len(ds["train"])
+        chunk_size = (train_len + dataset_num_splits - 1) // dataset_num_splits
+        start = dataset_split_index * chunk_size
+        end = min(start + chunk_size, train_len)
+        print(f"Selecting train chunk {dataset_split_index + 1}/{dataset_num_splits}")
+        ds["train"] = ds["train"].select(range(start, end))
+        print(ds)
+
+    # step 6b: for debugging only
     if overfit_check:
         ds["train"] = ds["train"].select(range(3))
         ds["eval"] = ds["train"]
@@ -322,8 +333,10 @@ if __name__ == "__main__":
     parser.add_argument("--language_model_name", type=str, default="Qwen/Qwen3-4B-Instruct-2507")
     parser.add_argument("--spatial_merge_size", type=int, default=2)
     parser.add_argument("--overfit_check", action="store_true")
-    parser.add_argument("--epochs", type=int, default=3)
-    parser.add_argument("--lr", type=float, default=5e-5)
+    parser.add_argument("--epochs", type=int, default=2)
+    parser.add_argument("--dataset_num_splits", type=int, default=5)
+    parser.add_argument("--dataset_split_index", type=int, default=-1)
+    parser.add_argument("--lr", type=float, default=5e-3)
     args = parser.parse_args()
 
     EXPERIMENT_NAME = args.experiment_name
@@ -334,13 +347,20 @@ if __name__ == "__main__":
     SPATIAL_MERGE_SIZE = args.spatial_merge_size
     VISION_MODEL_NAME = args.vision_model_name
     LANGUAGE_MODEL_NAME = args.language_model_name
+    DATASET_NUM_SPLITS = args.dataset_num_splits
+    DATASET_SPLIT_INDEX = args.dataset_split_index
+    OUTPUT_DIR = f"./outputs/{EXPERIMENT_NAME}"
 
     # initialize wandb
     wandb.login(key=config.WANDB_KEY)
     run = wandb.init(project=f"base_architecture", name=EXPERIMENT_NAME)
 
     # load dataset and dir where raw images are stored
-    ds, image_root = create_dataset(overfit_check=OVERFIT_CHECK)
+    ds, image_root = create_dataset(
+        overfit_check=OVERFIT_CHECK, 
+        dataset_num_splits = DATASET_NUM_SPLITS, 
+        dataset_split_index = DATASET_SPLIT_INDEX
+    )
 
     # load vision model
     vision_model, processor = load_vision_model(VISION_MODEL_NAME)
@@ -357,6 +377,11 @@ if __name__ == "__main__":
 
     # load custom proj layer
     proj_layer = Qwen3VLProjector(vision_dim, llm_dim, SPATIAL_MERGE_SIZE).to(DEVICE, dtype=torch.bfloat16)
+    if Path(SAVE_PATH).exists():
+        print(f"Loading existing projector weights from {SAVE_PATH}")
+        proj_layer.load_state_dict(torch.load(SAVE_PATH, map_location=DEVICE))
+    else:
+        print("No existing projector weights found; starting from scratch.")
 
     # load whole model now
     model = CustomVLM(vision_model, processor, language_model, tokenizer, proj_layer, image_token_id)
@@ -364,7 +389,7 @@ if __name__ == "__main__":
     collator = CustomVLMCollator(tokenizer, processor, image_root)
 
     training_args = TrainingArguments(
-        output_dir=f"./outputs/{EXPERIMENT_NAME}",
+        output_dir=OUTPUT_DIR,
         per_device_train_batch_size=8,
         per_device_eval_batch_size=16,
         gradient_accumulation_steps=4,
@@ -374,7 +399,8 @@ if __name__ == "__main__":
         bf16=True,
         remove_unused_columns=False,
         eval_strategy="epoch",
-        logging_strategy="epoch",
+        logging_strategy="steps",
+        logging_steps=100,
         save_strategy="no",
         report_to="wandb",
         lr_scheduler_type="cosine",
@@ -399,8 +425,7 @@ if __name__ == "__main__":
     print("finished training!")
 
     # do final eval on best model just to double check
-    best_state = torch.load(SAVE_PATH, map_location=DEVICE)
-    model.projector.load_state_dict(best_state)
+    model.projector.load_state_dict(torch.load(SAVE_PATH, map_location=DEVICE))
     run_generation_eval(model, ds["eval"], image_root, tokenizer, processor)
 
     run.finish()

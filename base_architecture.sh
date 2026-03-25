@@ -1,24 +1,33 @@
 #!/bin/bash
 #SBATCH --job-name=base_architecture
-#SBATCH --partition=preempt
+#SBATCH --partition=general
 #SBATCH --array=1-2
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
 #SBATCH --export=ALL
 #SBATCH --cpus-per-task=2
-#SBATCH --time=10:00:00
+#SBATCH --time=30:00:00
 #SBATCH --mem=48G
-#SBATCH --gpus=2
+#SBATCH --gpus=3
 #SBATCH --ntasks=1
+#SBATCH --constrain=A100_80GB|L40S|6000Ada
 
 case "$SLURM_ARRAY_TASK_ID" in
   1)
     LOG_NAME="overfit_check"
-    CMD=(python3 base_architecture.py --experiment_name overfit_check --overfit_check --epochs 100)
+    CMD=(python3 base_architecture.py --experiment_name overfit_check --overfit_check --epochs 100 --lr 5e-5)
     ;;
   2)
-    LOG_NAME="trial_run_full_dataset"
-    CMD=(python3 base_architecture.py --experiment_name trial_run_full_dataset)
+    LOG_NAME="v_large_lr"
+    CMD=(python3 base_architecture.py --experiment_name v_large_lr)
+    ;;
+  3)
+    LOG_NAME="v_large_lr_tiny_dataset"
+    CMD=(python3 base_architecture.py --experiment_name v_large_lr_tiny_dataset --dataset_split_index 0)
+    ;;
+  4)
+    LOG_NAME="v_large_lr_tiny_dataset_preempt"
+    CMD=(python3 base_architecture.py --experiment_name v_large_lr_tiny_dataset_preempt --dataset_split_index 0)
     ;;
   *)
     echo "Invalid SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
@@ -54,4 +63,4 @@ export HF_HOME="/data/user_data/mbairath/.hf_cache"
 export HF_HUB_CACHE="/data/hf_cache/hub"
 export HF_DATASETS_CACHE="/data/hf_cache/datasets"
 
-"${CMD[@]}"
+srun "${CMD[@]}"
