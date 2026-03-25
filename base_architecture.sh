@@ -6,7 +6,7 @@
 #SBATCH --error=/dev/null
 #SBATCH --export=ALL
 #SBATCH --cpus-per-task=2
-#SBATCH --time=30:00:00
+#SBATCH --time=10:00:00
 #SBATCH --mem=48G
 #SBATCH --gpus=3
 #SBATCH --ntasks=1
@@ -22,12 +22,8 @@ case "$SLURM_ARRAY_TASK_ID" in
     CMD=(python3 base_architecture.py --experiment_name v_large_lr)
     ;;
   3)
-    LOG_NAME="v_large_lr_tiny_dataset"
-    CMD=(python3 base_architecture.py --experiment_name v_large_lr_tiny_dataset --dataset_split_index 0)
-    ;;
-  4)
-    LOG_NAME="v_large_lr_tiny_dataset_preempt"
-    CMD=(python3 base_architecture.py --experiment_name v_large_lr_tiny_dataset_preempt --dataset_split_index 0)
+    LOG_NAME="v_large_lr_backup"
+    CMD=(python3 base_architecture.py --experiment_name v_large_lr_backup)
     ;;
   *)
     echo "Invalid SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"

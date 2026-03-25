@@ -14,15 +14,24 @@ from pprint import pprint
 from datasets import load_dataset, DatasetDict
 from huggingface_hub import snapshot_download
 from PIL import Image
-import matplotlib.pyplot as plt
-from transformers import AutoProcessor, AutoModel, AutoTokenizer, AutoModelForCausalLM, Trainer, TrainingArguments, TrainerCallback
+from transformers import (
+    AutoProcessor,
+    AutoModel,
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    Trainer,
+    TrainingArguments,
+    TrainerCallback,
+)
+from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR, get_last_checkpoint
+from transformers.trainer_callback import TrainerState
 import torch
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 SEED = 8
 bleu = evaluate.load("bleu")
 
-def create_dataset(overfit_check=False, dataset_num_splits=5, dataset_split_index=0):
+def create_dataset(overfit_check=False, dataset_num_splits=5, dataset_split_index=-1):
     # step 1: download the snapshots directly rather than let HF do it
     # also only download some of the files because there was this weird column mismatch thing happening
     snapshot_dir = Path(snapshot_download(
@@ -83,7 +92,6 @@ def create_dataset(overfit_check=False, dataset_num_splits=5, dataset_split_inde
     return ds, image_root
 
 # TODO: i had to make this diff than the notebook code - had to load the vision model block specifically
-# this might need to change if we mess around with other types of visual encoders
 def load_vision_model(vision_model_name):
     print(f"Loading Vision: {vision_model_name}")
     processor = AutoProcessor.from_pretrained(vision_model_name, use_fast=True)
@@ -249,15 +257,12 @@ class CustomVLM(torch.nn.Module):
         return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
     
 class GenEvalCallback(TrainerCallback):
-    def __init__(self, trainer, eval_ds, image_root, tokenizer, processor, save_path, overfit):
+    def __init__(self, trainer, eval_ds, image_root, tokenizer, processor, overfit):
         self.trainer = trainer
         self.eval_ds = eval_ds
         self.image_root = image_root
         self.tokenizer = tokenizer
         self.processor = processor
-        self.save_path = save_path
-        self.best_bleu = -1.0
-        self.best_loss = 100000
         self.overfit = overfit
 
     def on_evaluate(self, args, state, control, metrics=None, **kwargs):
@@ -273,21 +278,10 @@ class GenEvalCallback(TrainerCallback):
                 self.processor
             )
             metrics.update(gen_metrics)
-
-            if metrics["eval_bleu"] > self.best_bleu:
-                self.best_bleu = metrics["eval_bleu"]
-                torch.save(self.trainer.model.projector.state_dict(), self.save_path)
-
             self.trainer.log(gen_metrics)
-        else:
-            if metrics["eval_loss"] < self.best_loss:
-                self.best_loss = metrics["eval_loss"]
-                torch.save(self.trainer.model.projector.state_dict(), self.save_path)
-                print(f"Eval loss for this epoch: {metrics['eval_loss']}, best eval loss seen: {self.best_loss}")
 
         return control
         
-# TODO: speed up eval by doing it in batches OR running eval on only a subset
 def run_generation_eval(model, ds, image_root, tokenizer, processor):
     model.eval()
     preds, golds = [], []
@@ -326,6 +320,97 @@ def run_generation_eval(model, ds, image_root, tokenizer, processor):
     print(metrics)
     return(metrics)
 
+class ProjectorOnlyTrainer(Trainer):
+    """
+    Lightweight checkpointing:
+      - saves only projector weights
+      - saves trainer state / training args for bookkeeping
+      - does NOT save frozen backbones, optimizer / scheduler / scaler / RNG
+    """
+
+    def _save(self, output_dir=None, state_dict=None):
+        output_dir = output_dir if output_dir is not None else self.args.output_dir
+        os.makedirs(output_dir, exist_ok=True)
+
+        model = self.model
+        if hasattr(self, "accelerator"):
+            model = self.accelerator.unwrap_model(model)
+
+        torch.save(model.projector.state_dict(), os.path.join(output_dir, "projector.pt"))
+        torch.save(self.args, os.path.join(output_dir, "training_args.bin"))
+
+    def _save_checkpoint(self, model, trial=None, metrics=None):
+        checkpoint_folder = f"{PREFIX_CHECKPOINT_DIR}-{self.state.global_step}"
+        output_dir = os.path.join(self.args.output_dir, checkpoint_folder)
+        os.makedirs(output_dir, exist_ok=True)
+
+        # save projector + args
+        self._save(output_dir)
+
+        # save trainer bookkeeping state
+        self.state.save_to_json(os.path.join(output_dir, "trainer_state.json"))
+
+        # update best checkpoint tracking
+        if metrics is not None and self.args.metric_for_best_model is not None:
+            metric_to_check = self.args.metric_for_best_model
+            if not metric_to_check.startswith("eval_"):
+                metric_to_check = f"eval_{metric_to_check}"
+
+            metric_value = metrics.get(metric_to_check)
+            if metric_value is not None:
+                operator = np.greater if self.args.greater_is_better else np.less
+                if (
+                    self.state.best_metric is None
+                    or self.state.best_model_checkpoint is None
+                    or operator(metric_value, self.state.best_metric)
+                ):
+                    self.state.best_metric = metric_value
+                    self.state.best_model_checkpoint = output_dir
+                    self.state.save_to_json(os.path.join(output_dir, "trainer_state.json"))
+
+        self._rotate_checkpoints(use_mtime=False, output_dir=self.args.output_dir)
+
+    def _load_from_checkpoint(self, resume_from_checkpoint, model=None):
+        if model is None:
+            model = self.model
+
+        print(f"Loading custom checkpoint from {resume_from_checkpoint}")
+
+        if hasattr(self, "accelerator"):
+            unwrapped_model = self.accelerator.unwrap_model(model)
+        else:
+            unwrapped_model = model
+
+        projector_path = os.path.join(resume_from_checkpoint, "projector.pt")
+        trainer_state_path = os.path.join(resume_from_checkpoint, "trainer_state.json")
+
+        if not os.path.exists(projector_path):
+            raise ValueError(f"Missing projector checkpoint at {projector_path}")
+
+        projector_state = torch.load(projector_path, map_location="cpu", weights_only=False)
+        unwrapped_model.projector.load_state_dict(projector_state)
+
+        if os.path.exists(trainer_state_path):
+            self.state = TrainerState.load_from_json(trainer_state_path)
+
+    def _load_best_model(self):
+        if self.state.best_model_checkpoint is None:
+            print("No best model checkpoint found; skipping best model load.")
+            return
+
+        print(f"Loading best projector from {self.state.best_model_checkpoint}")
+
+        model = self.model
+        if hasattr(self, "accelerator"):
+            model = self.accelerator.unwrap_model(model)
+
+        projector_path = os.path.join(self.state.best_model_checkpoint, "projector.pt")
+        if not os.path.exists(projector_path):
+            raise ValueError(f"Best projector checkpoint missing at {projector_path}")
+
+        state_dict = torch.load(projector_path, map_location="cpu", weights_only=False)
+        model.projector.load_state_dict(state_dict)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--experiment_name", type=str, required=True)
@@ -341,7 +426,6 @@ if __name__ == "__main__":
 
     EXPERIMENT_NAME = args.experiment_name
     OVERFIT_CHECK = True if args.overfit_check else False
-    SAVE_PATH = f"./outputs/{EXPERIMENT_NAME}_proj_final_weights.pt"
     LR = args.lr
     EPOCHS = args.epochs
     SPATIAL_MERGE_SIZE = args.spatial_merge_size
@@ -377,11 +461,6 @@ if __name__ == "__main__":
 
     # load custom proj layer
     proj_layer = Qwen3VLProjector(vision_dim, llm_dim, SPATIAL_MERGE_SIZE).to(DEVICE, dtype=torch.bfloat16)
-    if Path(SAVE_PATH).exists():
-        print(f"Loading existing projector weights from {SAVE_PATH}")
-        proj_layer.load_state_dict(torch.load(SAVE_PATH, map_location=DEVICE))
-    else:
-        print("No existing projector weights found; starting from scratch.")
 
     # load whole model now
     model = CustomVLM(vision_model, processor, language_model, tokenizer, proj_layer, image_token_id)
@@ -398,34 +477,42 @@ if __name__ == "__main__":
         run_name=EXPERIMENT_NAME,
         bf16=True,
         remove_unused_columns=False,
-        eval_strategy="epoch",
-        logging_strategy="steps",
-        logging_steps=100,
-        save_strategy="no",
         report_to="wandb",
         lr_scheduler_type="cosine",
         warmup_ratio=0.03,
-        seed=SEED
+        seed=SEED,
+        load_best_model_at_end=True,
+        save_total_limit=2,
+        eval_strategy="steps",
+        eval_steps=200,
+        logging_strategy="steps",
+        logging_steps=200,
+        save_strategy="steps",
+        save_steps=200
     )
 
-    trainer = Trainer(
+    trainer = ProjectorOnlyTrainer(
         model=model,
         args=training_args,
         train_dataset=ds["train"],
         eval_dataset=ds["eval"],
         data_collator=collator,
     )
-    trainer.add_callback(GenEvalCallback(trainer, ds["eval"], image_root, tokenizer, processor, SAVE_PATH, OVERFIT_CHECK))
-    Path(SAVE_PATH).parent.mkdir(parents=True, exist_ok=True)
+    trainer.add_callback(GenEvalCallback(trainer, ds["eval"], image_root, tokenizer, processor, OVERFIT_CHECK))
 
     # not resuming from checkpoint, as we're only saving the proj layer weights
     # we cant simply just load those, we'd need to save the scheduler, optim states too and im lazy
     print("beginning training!")
-    trainer.train()
+    last_checkpoint = get_last_checkpoint(OUTPUT_DIR) if os.path.isdir(OUTPUT_DIR) else None
+    if last_checkpoint is not None:
+        print(f"Resuming from checkpoint: {last_checkpoint}")
+        trainer.train(resume_from_checkpoint=last_checkpoint)
+    else:
+        print("No checkpoint found, starting training from scratch.")
+        trainer.train()
     print("finished training!")
 
     # do final eval on best model just to double check
-    model.projector.load_state_dict(torch.load(SAVE_PATH, map_location=DEVICE))
     run_generation_eval(model, ds["eval"], image_root, tokenizer, processor)
 
     run.finish()
