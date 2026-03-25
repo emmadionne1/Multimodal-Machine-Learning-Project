@@ -422,6 +422,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_num_splits", type=int, default=5)
     parser.add_argument("--dataset_split_index", type=int, default=-1)
     parser.add_argument("--lr", type=float, default=5e-3)
+    parser.add_argument("--unfreeze_backbones", action="store_true")
     args = parser.parse_args()
 
     EXPERIMENT_NAME = args.experiment_name
@@ -434,6 +435,7 @@ if __name__ == "__main__":
     DATASET_NUM_SPLITS = args.dataset_num_splits
     DATASET_SPLIT_INDEX = args.dataset_split_index
     OUTPUT_DIR = f"./outputs/{EXPERIMENT_NAME}"
+    UNFREEZE_BACKBONES = True if args.unfreeze_backbones else False
 
     # initialize wandb
     wandb.login(key=config.WANDB_KEY)
@@ -464,7 +466,8 @@ if __name__ == "__main__":
 
     # load whole model now
     model = CustomVLM(vision_model, processor, language_model, tokenizer, proj_layer, image_token_id)
-    model.freeze_backbones()
+    if not UNFREEZE_BACKBONES:
+        model.freeze_backbones()
     collator = CustomVLMCollator(tokenizer, processor, image_root)
 
     training_args = TrainingArguments(
@@ -481,14 +484,13 @@ if __name__ == "__main__":
         lr_scheduler_type="cosine",
         warmup_ratio=0.03,
         seed=SEED,
-        load_best_model_at_end=True,
         save_total_limit=2,
         eval_strategy="steps",
-        eval_steps=200,
+        eval_steps=5000, # making this large because it takes 1hr+ to run, and so i've also set load best model at end = false
         logging_strategy="steps",
-        logging_steps=200,
+        logging_steps=100,
         save_strategy="steps",
-        save_steps=200
+        save_steps=100
     )
 
     trainer = ProjectorOnlyTrainer(

@@ -10,7 +10,7 @@
 #SBATCH --mem=48G
 #SBATCH --gpus=3
 #SBATCH --ntasks=1
-#SBATCH --constrain=A100_80GB|L40S|6000Ada
+#SBATCH --constrain=A100_80GB|L40S|6000Ada|A6000
 
 case "$SLURM_ARRAY_TASK_ID" in
   1)
@@ -24,6 +24,10 @@ case "$SLURM_ARRAY_TASK_ID" in
   3)
     LOG_NAME="v_large_lr_backup"
     CMD=(python3 base_architecture.py --experiment_name v_large_lr_backup)
+    ;;
+  4)
+    LOG_NAME="v_large_lr_backup_tiny"
+    CMD=(python3 base_architecture.py --experiment_name v_large_lr_backup_tiny --dataset_split_index 0)
     ;;
   *)
     echo "Invalid SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
