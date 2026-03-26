@@ -651,7 +651,7 @@ if __name__ == "__main__":
     os.environ['PYTHONHASHSEED'] = str(SEED)
 
     # initialize wandb
-    wandb.login(key=config.WANDB_KEY)
+    wandb.login()
     run = wandb.init(project=f"base_architecture", name=EXPERIMENT_NAME)
 
     # load dataset and dir where raw images are stored
