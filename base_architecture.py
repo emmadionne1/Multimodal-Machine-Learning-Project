@@ -10,6 +10,8 @@ import os
 import config
 import numpy as np
 import argparse
+import math
+import re
 from pprint import pprint
 from datasets import load_dataset, DatasetDict
 from huggingface_hub import snapshot_download
@@ -26,6 +28,8 @@ from transformers import (
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR, get_last_checkpoint
 from transformers.trainer_callback import TrainerState
 import torch
+import os
+
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 SEED = 8
@@ -91,6 +95,67 @@ def create_dataset(overfit_check=False, dataset_num_splits=5, dataset_split_inde
 
     return ds, image_root
 
+def create_chartqa_dataset(overfit_check: bool = False, dataset_num_splits=5, dataset_split_index=-1):
+    """
+    Create a prompt-completion dataset for ChartQA.
+
+    The model expects an `<image>` token inside the `prompt` so it can locate
+    where to splice projected vision embeddings.
+    """
+    raw = load_dataset("HuggingFaceM4/ChartQA")
+
+    train_split = raw["train"]
+    if "val" in raw:
+        eval_split = raw["val"]
+    elif "validation" in raw:
+        eval_split = raw["validation"]
+    else:
+        eval_split = raw["test"]
+
+    test_split = raw["test"] if "test" in raw else raw["train"]
+    
+    def to_prompt_completion_batch(batch):
+        golds = [str(lbl[0]).strip() if lbl else "" for lbl in batch.get("label", [])]
+        prompts = [f"<image>\nQuestion: {q}\nAnswer:" for q in batch["query"]]
+        return {
+            "image": batch["image"],
+            "prompt": prompts,
+            "completion": golds,
+    }
+
+    keep_cols = {"image", "prompt", "completion"}
+    train = train_split.map(
+        to_prompt_completion_batch,
+        batched=True, 
+        batch_size=1000,
+        remove_columns=[c for c in train_split.column_names if c not in keep_cols],
+        num_proc=os.cpu_count()
+    )
+    eval_ds = eval_split.map(
+        to_prompt_completion_batch,
+        batched=True, 
+        batch_size=1000,
+        remove_columns=[c for c in train_split.column_names if c not in keep_cols],
+        num_proc=os.cpu_count()
+    )
+    test_ds = test_split.map(
+        to_prompt_completion_batch,
+        batched=True, 
+        batch_size=1000,
+        remove_columns=[c for c in train_split.column_names if c not in keep_cols],
+        num_proc=os.cpu_count()
+    )
+
+    ds = DatasetDict({"train": train, "eval": eval_ds, "test": test_ds})
+
+    if overfit_check:
+        ds["train"] = ds["train"].select(range(min(3, len(ds["train"]))))
+        ds["eval"] = ds["train"]
+        ds["test"] = ds["train"]
+
+    # For ChartQA we keep images inside the dataset; no external image_root needed.
+    return ds, None
+
 # TODO: i had to make this diff than the notebook code - had to load the vision model block specifically
 def load_vision_model(vision_model_name):
     print(f"Loading Vision: {vision_model_name}")
@@ -135,10 +200,35 @@ class Qwen3VLProjector(torch.nn.Module):
         return self.mlp(x)
     
 class CustomVLMCollator():
-    def __init__(self, tokenizer, processor, image_root):
+    def __init__(self, tokenizer, processor, image_root=None):
         self.tokenizer = tokenizer
         self.processor = processor
         self.image_root = image_root
+
+    def _load_image(self, ex_image):
+        """
+        ChartQA provides a PIL image in `ex["image"]`.
+        LLaVA pretrain provides a string filename to open under `image_root`.
+        """
+        if isinstance(ex_image, str):
+            if self.image_root is None:
+                return Image.open(ex_image).convert("RGB")
+            return Image.open(self.image_root / ex_image).convert("RGB")
+
+        # Most datasets will yield a PIL.Image instance.
+        if hasattr(ex_image, "convert"):
+            return ex_image.convert("RGB")
+
+        # Extra robustness for dict-based image representations.
+        if isinstance(ex_image, dict):
+            path = ex_image.get("path") or ex_image.get("image") or ex_image.get("file_name")
+            if path is None:
+                raise ValueError(f"Unsupported image dict keys: {list(ex_image.keys())}")
+            if self.image_root is None:
+                return Image.open(path).convert("RGB")
+            return Image.open(self.image_root / path).convert("RGB")
+
+        raise ValueError(f"Unsupported image type: {type(ex_image)}")
 
     def __call__(self, examples):
         images = []
@@ -147,7 +237,7 @@ class CustomVLMCollator():
         attention_masks = []
 
         for ex in examples:
-            images.append(Image.open(self.image_root / ex["image"]).convert("RGB"))
+            images.append(self._load_image(ex["image"]))
 
             messages = [{"role": "user", "content": ex["prompt"]}, {"role": "assistant", "content": ex["completion"]}]
             full_text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
@@ -257,13 +347,14 @@ class CustomVLM(torch.nn.Module):
         return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
     
 class GenEvalCallback(TrainerCallback):
-    def __init__(self, trainer, eval_ds, image_root, tokenizer, processor, overfit):
+    def __init__(self, trainer, eval_ds, image_root, tokenizer, processor, overfit, dataset_type):
         self.trainer = trainer
         self.eval_ds = eval_ds
         self.image_root = image_root
         self.tokenizer = tokenizer
         self.processor = processor
         self.overfit = overfit
+        self.dataset_type = dataset_type
 
     def on_evaluate(self, args, state, control, metrics=None, **kwargs):
         if metrics is None:
@@ -275,14 +366,77 @@ class GenEvalCallback(TrainerCallback):
                 self.eval_ds,
                 self.image_root,
                 self.tokenizer,
-                self.processor
+                self.processor,
+                dataset_type=self.dataset_type,
             )
             metrics.update(gen_metrics)
             self.trainer.log(gen_metrics)
 
         return control
         
-def run_generation_eval(model, ds, image_root, tokenizer, processor):
+def extract_answer(text: str) -> str:
+    text = str(text).strip()
+    if not text:
+        return ""
+
+    # Your baselines evaluate on the final answer portion.
+    if "Answer:" in text:
+        text = text.split("Answer:", 1)[-1]
+    text = text.strip()
+
+    lines = text.splitlines()
+    if len(lines) == 0:
+        return ""
+    first = lines[0].strip()
+
+    # Remove common "final answer: ..." prefixes.
+    first = re.sub(
+        r"^(final answer|final|answer)\s*[:\-]\s*",
+        "",
+        first,
+        flags=re.IGNORECASE,
+    ).strip()
+    return first
+
+def normalize_answer(s):
+    s = str(s).lower().strip()
+    s = re.sub(r"\s+", " ", s)
+    return s
+
+def to_float(s):
+    s = str(s).replace(",", "").strip()
+    if s.endswith("%"):
+        try:
+            return float(s[:-1]) / 100.0
+        except:
+            return None
+    try:
+        return float(s)
+    except:
+        return None
+
+def is_answer_correct_relaxed(pred, gold):
+    pred_norm, gold_norm = normalize_answer(pred), normalize_answer(gold)
+    pred_num, gold_num = to_float(pred_norm), to_float(gold_norm)
+
+    if pred_num is not None and gold_num is not None:
+        if math.isclose(gold_num, 0.0):
+            return float(math.isclose(pred_num, 0.0))
+        rel_err = abs(pred_num - gold_num) / abs(gold_num)
+        return float(rel_err <= 0.05)
+
+    return float(pred_norm == gold_norm)
+
+def is_answer_correct_exact(pred, gold):
+    pred_norm, gold_norm = normalize_answer(pred), normalize_answer(gold)
+    pred_num, gold_num = to_float(pred_norm), to_float(gold_norm)
+
+    if pred_num is not None and gold_num is not None:
+        return float(pred_num == gold_num)
+
+    return float(pred_norm == gold_norm)
+
+def run_generation_eval(model, ds, image_root, tokenizer, processor, dataset_type = "llava"):
     model.eval()
     preds, golds = [], []
 
@@ -296,23 +450,69 @@ def run_generation_eval(model, ds, image_root, tokenizer, processor):
             )
             prompt_ids = tokenizer(prompt_text, return_tensors="pt", add_special_tokens=False)["input_ids"].to(DEVICE)
             attention_mask = torch.ones_like(prompt_ids).to(DEVICE)
-            pixel_values = processor(
-                images=[Image.open(image_root / ex["image"]).convert("RGB")], return_tensors="pt"
-            ).pixel_values.to(DEVICE)
-
+            if dataset_type == "llava":
+                pixel_values = processor(
+                    images=[Image.open(image_root / ex["image"]).convert("RGB")],
+                    return_tensors="pt",
+                ).pixel_values.to(DEVICE)
+            else:
+                # ChartQA: images are stored directly in the dataset.
+                if hasattr(ex["image"], "convert"):
+                    img = ex["image"].convert("RGB")
+                elif isinstance(ex["image"], dict):
+                    path = ex["image"].get("path") or ex["image"].get("image") or ex["image"].get("file_name")
+                    if path is None:
+                        raise ValueError(f"Unsupported image dict keys in eval: {list(ex['image'].keys())}")
+                    if image_root is None:
+                        img = Image.open(path).convert("RGB")
+                    else:
+                        img = Image.open(image_root / path).convert("RGB")
+                elif isinstance(ex["image"], str):
+                    if image_root is None:
+                        img = Image.open(ex["image"]).convert("RGB")
+                    else:
+                        img = Image.open(image_root / ex["image"]).convert("RGB")
+                else:
+                    raise ValueError(f"Unsupported image type in eval: {type(ex['image'])}")
+                pixel_values = processor(images=[img], return_tensors="pt").pixel_values.to(DEVICE)
             # run generation
             gen_text = model.generate_text(prompt_ids, attention_mask, pixel_values, max_new_tokens=64)
-            preds.append(gen_text)
-            golds.append(ex["completion"])
+            if dataset_type == "chartqa":
+                pred = extract_answer(gen_text)
+                preds.append(pred)
+                golds.append(ex["completion"])
 
-            print("PRINTING OUT OUTPUTS")
-            print("GENERATED:\n", preds[-1])
-            print("TARGET:\n", golds[-1])
+                # print("PRINTING OUT OUTPUTS")
+                # print("GENERATED:\n", preds[-1])
+                # print("TARGET:\n", golds[-1])
+            else:
+                preds.append(gen_text)
+                golds.append(ex["completion"])
 
+                # print("PRINTING OUT OUTPUTS")
+                # print("GENERATED:\n", preds[-1])
+                # print("TARGET:\n", golds[-1])
     # compute metrics
+    if dataset_type == "chartqa":
+        correct_relaxed, correct_exact, total = 0.0, 0.0, 0
+        for pred, gold in zip(preds, golds):
+            c_relaxed = is_answer_correct_relaxed(pred, gold)
+            c_exact = is_answer_correct_exact(pred, gold)
+            correct_relaxed += c_relaxed
+            correct_exact += c_exact
+            total += 1
+
+        metrics = {
+            "eval_relaxed_acc": float(correct_relaxed / max(total, 1)),
+            "eval_exact_acc": float(correct_exact / max(total, 1)),
+        }
+        print(f"Relaxed accuracy: {metrics['eval_relaxed_acc']:.4f}")
+        print(f"Exact accuracy: {metrics['eval_exact_acc']:.4f}")
+        return metrics
+
     bleu_scores = []
     for pred, gold in zip(preds, golds):
-        if len(pred.strip()) == 0:
+        if len(str(pred).strip()) == 0:
             bleu_scores.append(0.0)
         else:
             bleu_scores.append(bleu.compute(predictions=[pred], references=[gold])["bleu"])
@@ -414,6 +614,7 @@ class ProjectorOnlyTrainer(Trainer):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--experiment_name", type=str, required=True)
+    parser.add_argument("--dataset_type", type=str, default="llava", choices=["llava", "chartqa"])
     parser.add_argument("--vision_model_name", type=str, default="google/siglip2-so400m-patch16-512") 
     parser.add_argument("--language_model_name", type=str, default="Qwen/Qwen3-4B-Instruct-2507")
     parser.add_argument("--spatial_merge_size", type=int, default=2)
@@ -426,6 +627,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     EXPERIMENT_NAME = args.experiment_name
+    DATASET_TYPE = args.dataset_type
     OVERFIT_CHECK = True if args.overfit_check else False
     LR = args.lr
     EPOCHS = args.epochs
@@ -437,16 +639,28 @@ if __name__ == "__main__":
     OUTPUT_DIR = f"./outputs/{EXPERIMENT_NAME}"
     UNFREEZE_BACKBONES = True if args.unfreeze_backbones else False
 
+    torch.manual_seed(SEED)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(SEED)
+        torch.cuda.manual_seed_all(SEED)  # for multi-GPU
+    
+    # 2. Set seed for other Python libraries
+    np.random.seed(SEED)
+    os.environ['PYTHONHASHSEED'] = str(SEED)
+
     # initialize wandb
     wandb.login(key=config.WANDB_KEY)
     run = wandb.init(project=f"base_architecture", name=EXPERIMENT_NAME)
 
     # load dataset and dir where raw images are stored
-    ds, image_root = create_dataset(
-        overfit_check=OVERFIT_CHECK, 
-        dataset_num_splits = DATASET_NUM_SPLITS, 
-        dataset_split_index = DATASET_SPLIT_INDEX
-    )
+    if DATASET_TYPE == "chartqa":
+        ds, image_root = create_chartqa_dataset(overfit_check=OVERFIT_CHECK, 
+                                                dataset_num_splits = DATASET_NUM_SPLITS, 
+                                                dataset_split_index = DATASET_SPLIT_INDEX)
+    else:
+        ds, image_root = create_dataset(overfit_check=OVERFIT_CHECK,
+                                        dataset_num_splits = DATASET_NUM_SPLITS, 
+                                        dataset_split_index = DATASET_SPLIT_INDEX)
 
     # load vision model
     vision_model, processor = load_vision_model(VISION_MODEL_NAME)
