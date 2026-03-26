@@ -322,8 +322,8 @@ if __name__ == "__main__":
     parser.add_argument("--language_model_name", type=str, default="Qwen/Qwen3-4B-Instruct-2507")
     parser.add_argument("--spatial_merge_size", type=int, default=2)
     parser.add_argument("--overfit_check", action="store_true")
-    parser.add_argument("--epochs", type=int, default=3)
-    parser.add_argument("--lr", type=float, default=5e-5)
+    parser.add_argument("--epochs", type=int, default=1)
+    parser.add_argument("--lr", type=float, default=1e-4)
     args = parser.parse_args()
 
     EXPERIMENT_NAME = args.experiment_name
@@ -365,16 +365,17 @@ if __name__ == "__main__":
 
     training_args = TrainingArguments(
         output_dir=f"./outputs/{EXPERIMENT_NAME}",
-        per_device_train_batch_size=8,
-        per_device_eval_batch_size=16,
+        per_device_train_batch_size=12,
+        per_device_eval_batch_size=12,
         gradient_accumulation_steps=4,
         learning_rate=LR,
         num_train_epochs=EPOCHS,
         run_name=EXPERIMENT_NAME,
         bf16=True,
         remove_unused_columns=False,
-        eval_strategy="epoch",
-        logging_strategy="epoch",
+        eval_strategy="steps",
+        eval_steps=1000,
+        logging_steps=2,
         save_strategy="no",
         report_to="wandb",
         lr_scheduler_type="cosine",
