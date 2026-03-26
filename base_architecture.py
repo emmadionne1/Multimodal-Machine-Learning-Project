@@ -160,7 +160,7 @@ def create_chartqa_dataset(overfit_check: bool = False, dataset_num_splits=5, da
 def load_vision_model(vision_model_name):
     print(f"Loading Vision: {vision_model_name}")
     processor = AutoProcessor.from_pretrained(vision_model_name, use_fast=True)
-    vision_model = AutoModel.from_pretrained(vision_model_name).to(DEVICE)
+    vision_model = AutoModel.from_pretrained(vision_model_name)
     vision_model.eval()
     return vision_model.vision_model, processor
 
@@ -286,7 +286,8 @@ class CustomVLM(torch.nn.Module):
     def forward(self, input_ids=None, attention_mask=None, labels=None, pixel_values=None, **kwargs):
         # TODO: needed to change the float type from f32 to bf16
         with torch.no_grad():
-            vision_outputs = self.vision_model(pixel_values=pixel_values).last_hidden_state.to(self.projector.norm.weight.dtype)
+            vision_outputs = self.vision_model(pixel_values=pixel_values).last_hidden_state.
+            vision_outputs = visioun_outputs.to(self.projector.norm.weight.dtype)
         image_features = self.projector(vision_outputs)
         with torch.no_grad():
             inputs_embeds = self.language_model.get_input_embeddings()(input_ids)
@@ -448,13 +449,14 @@ def run_generation_eval(model, ds, image_root, tokenizer, processor, dataset_typ
                 tokenize=False,
                 add_generation_prompt=True
             )
-            prompt_ids = tokenizer(prompt_text, return_tensors="pt", add_special_tokens=False)["input_ids"].to(DEVICE)
-            attention_mask = torch.ones_like(prompt_ids).to(DEVICE)
+            device = next(model.parameters()).device
+            prompt_ids = tokenizer(prompt_text, return_tensors="pt", add_special_tokens=False)["input_ids"].to(device)
+            attention_mask = torch.ones_like(prompt_ids).to(device)
             if dataset_type == "llava":
                 pixel_values = processor(
                     images=[Image.open(image_root / ex["image"]).convert("RGB")],
                     return_tensors="pt",
-                ).pixel_values.to(DEVICE)
+                ).pixel_values.to(device)
             else:
                 # ChartQA: images are stored directly in the dataset.
                 if hasattr(ex["image"], "convert"):
@@ -474,7 +476,7 @@ def run_generation_eval(model, ds, image_root, tokenizer, processor, dataset_typ
                         img = Image.open(image_root / ex["image"]).convert("RGB")
                 else:
                     raise ValueError(f"Unsupported image type in eval: {type(ex['image'])}")
-                pixel_values = processor(images=[img], return_tensors="pt").pixel_values.to(DEVICE)
+                pixel_values = processor(images=[img], return_tensors="pt").pixel_values.to(device)
             # run generation
             gen_text = model.generate_text(prompt_ids, attention_mask, pixel_values, max_new_tokens=64)
             if dataset_type == "chartqa":
@@ -676,13 +678,14 @@ if __name__ == "__main__":
     image_token_id = tokenizer.convert_tokens_to_ids("<image>")
 
     # load custom proj layer
-    proj_layer = Qwen3VLProjector(vision_dim, llm_dim, SPATIAL_MERGE_SIZE).to(DEVICE, dtype=torch.bfloat16)
+    proj_layer = Qwen3VLProjector(vision_dim, llm_dim, SPATIAL_MERGE_SIZE).to(dtype=torch.bfloat16)
 
     # load whole model now
     model = CustomVLM(vision_model, processor, language_model, tokenizer, proj_layer, image_token_id)
     if not UNFREEZE_BACKBONES:
         model.freeze_backbones()
     collator = CustomVLMCollator(tokenizer, processor, image_root)
+    os.environ["WANDB_DISABLED"] = "true" if int(os.environ.get("LOCAL_RANK", 0)) != 0 else "false"
 
     training_args = TrainingArguments(
         output_dir=OUTPUT_DIR,
@@ -704,7 +707,10 @@ if __name__ == "__main__":
         logging_strategy="steps",
         logging_steps=100,
         save_strategy="steps",
-        save_steps=100
+        save_steps=100,
+        dataloader_num_workers=8,
+        dataloader_pin_memory=True,
+        logging_dir=OUTPUT_DIR,
     )
 
     trainer = ProjectorOnlyTrainer(
@@ -714,7 +720,7 @@ if __name__ == "__main__":
         eval_dataset=ds["eval"],
         data_collator=collator,
     )
-    trainer.add_callback(GenEvalCallback(trainer, ds["eval"], image_root, tokenizer, processor, OVERFIT_CHECK))
+    trainer.add_callback(GenEvalCallback(trainer, ds["eval"], image_root, tokenizer, processor, OVERFIT_CHECK, "chartqa"))
 
     # not resuming from checkpoint, as we're only saving the proj layer weights
     # we cant simply just load those, we'd need to save the scheduler, optim states too and im lazy
@@ -729,7 +735,7 @@ if __name__ == "__main__":
     print("finished training!")
 
     # do final eval on best model just to double check
-    run_generation_eval(model, ds["eval"], image_root, tokenizer, processor)
+    run_generation_eval(model, ds["eval"], image_root, tokenizer, processor, "chartqa")
 
     run.finish()
     print("done!")
