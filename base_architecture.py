@@ -25,13 +25,50 @@ from transformers import (
 )
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR, get_last_checkpoint
 from transformers.trainer_callback import TrainerState
+from baselines.multimodal_prompting_baselines import is_answer_correct_relaxed
 import torch
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 SEED = 8
 bleu = evaluate.load("bleu")
 
-def create_dataset(overfit_check=False, dataset_num_splits=5, dataset_split_index=-1):
+def convert_chartqa_example(ex):
+    answer = ex["label"][0]
+    prompt = (
+        "<image>\n"
+        "You are a chart question-answering assistant. Respond with the final answer only, no explanations.\n"
+        f"Question: {ex['query'].strip()}\n"
+        "Answer:"
+    )
+    return {"image": ex["image"], "prompt": prompt, "completion": str(answer).strip()}
+
+def create_dataset(overfit_check=False, dataset_num_splits=5, dataset_split_index=-1, pretraining=True):
+    if not pretraining:
+        raw = load_dataset("HuggingFaceM4/ChartQA")
+
+        eval_split = "val" if "val" in raw else "validation" if "validation" in raw else "test"
+        test_split = "test" if "test" in raw else eval_split
+
+        if overfit_check:
+            train_raw = raw["train"].select(range(3))
+            eval_raw = train_raw
+            test_raw = train_raw
+        else:
+            train_raw = raw["train"]
+            eval_raw = raw[eval_split]
+            test_raw = raw[test_split]
+
+        ds = DatasetDict({
+            "train": train_raw.map(convert_chartqa_example),
+            "eval": eval_raw.map(convert_chartqa_example),
+            "test": test_raw.map(convert_chartqa_example),
+        })
+
+        print(ds)
+        print(ds["train"][0])
+
+        return ds, None
+    
     # step 1: download the snapshots directly rather than let HF do it
     # also only download some of the files because there was this weird column mismatch thing happening
     snapshot_dir = Path(snapshot_download(
@@ -105,7 +142,7 @@ def load_language_model(language_model_name):
     tokenizer = AutoTokenizer.from_pretrained(language_model_name, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    llm = AutoModelForCausalLM.from_pretrained(language_model_name, dtype=torch.bfloat16, trust_remote_code=True)
+    llm = AutoModelForCausalLM.from_pretrained(language_model_name, torch_dtype=torch.bfloat16, trust_remote_code=True)
     return llm, tokenizer
 
 class Qwen3VLProjector(torch.nn.Module):
@@ -134,6 +171,11 @@ class Qwen3VLProjector(torch.nn.Module):
         x = x.view(B, -1, self.merged_dim)
         return self.mlp(x)
     
+def load_image(image_root, image_field):
+    if isinstance(image_field, Image.Image):
+        return image_field.convert("RGB")
+    return Image.open(image_root / image_field).convert("RGB")
+    
 class CustomVLMCollator():
     def __init__(self, tokenizer, processor, image_root):
         self.tokenizer = tokenizer
@@ -147,7 +189,7 @@ class CustomVLMCollator():
         attention_masks = []
 
         for ex in examples:
-            images.append(Image.open(self.image_root / ex["image"]).convert("RGB"))
+            images.append(load_image(self.image_root, ex["image"]))
 
             messages = [{"role": "user", "content": ex["prompt"]}, {"role": "assistant", "content": ex["completion"]}]
             full_text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
@@ -257,13 +299,14 @@ class CustomVLM(torch.nn.Module):
         return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
     
 class GenEvalCallback(TrainerCallback):
-    def __init__(self, trainer, eval_ds, image_root, tokenizer, processor, overfit):
+    def __init__(self, trainer, eval_ds, image_root, tokenizer, processor, overfit, pretrain):
         self.trainer = trainer
         self.eval_ds = eval_ds
         self.image_root = image_root
         self.tokenizer = tokenizer
         self.processor = processor
         self.overfit = overfit
+        self.pretrain = pretrain
 
     def on_evaluate(self, args, state, control, metrics=None, **kwargs):
         if metrics is None:
@@ -275,14 +318,15 @@ class GenEvalCallback(TrainerCallback):
                 self.eval_ds,
                 self.image_root,
                 self.tokenizer,
-                self.processor
+                self.processor,
+                self.pretrain
             )
             metrics.update(gen_metrics)
             self.trainer.log(gen_metrics)
 
         return control
         
-def run_generation_eval(model, ds, image_root, tokenizer, processor):
+def run_generation_eval(model, ds, image_root, tokenizer, processor, pretrain):
     model.eval()
     preds, golds = [], []
 
@@ -297,7 +341,7 @@ def run_generation_eval(model, ds, image_root, tokenizer, processor):
             prompt_ids = tokenizer(prompt_text, return_tensors="pt", add_special_tokens=False)["input_ids"].to(DEVICE)
             attention_mask = torch.ones_like(prompt_ids).to(DEVICE)
             pixel_values = processor(
-                images=[Image.open(image_root / ex["image"]).convert("RGB")], return_tensors="pt"
+                images=[load_image(image_root, ex["image"])], return_tensors="pt"
             ).pixel_values.to(DEVICE)
 
             # run generation
@@ -310,13 +354,17 @@ def run_generation_eval(model, ds, image_root, tokenizer, processor):
             print("TARGET:\n", golds[-1])
 
     # compute metrics
-    bleu_scores = []
-    for pred, gold in zip(preds, golds):
-        if len(pred.strip()) == 0:
-            bleu_scores.append(0.0)
-        else:
-            bleu_scores.append(bleu.compute(predictions=[pred], references=[gold])["bleu"])
-    metrics = {"eval_bleu": float(np.mean(bleu_scores))}
+    if not pretrain:
+        relaxed_scores = [is_answer_correct_relaxed(pred, gold) for pred, gold in zip(preds, golds)]
+        metrics = {"eval_relaxed_accuracy": float(np.mean(relaxed_scores))}
+    else:
+        bleu_scores = []
+        for pred, gold in zip(preds, golds):
+            if len(pred.strip()) == 0:
+                bleu_scores.append(0.0)
+            else:
+                bleu_scores.append(bleu.compute(predictions=[pred], references=[gold])["bleu"])
+        metrics = {"eval_bleu": float(np.mean(bleu_scores))}
     print(metrics)
     return(metrics)
 
@@ -422,7 +470,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_num_splits", type=int, default=5)
     parser.add_argument("--dataset_split_index", type=int, default=-1)
     parser.add_argument("--lr", type=float, default=5e-3)
-    parser.add_argument("--unfreeze_backbones", action="store_true")
+    parser.add_argument("--pretrain", action="store_true")
     args = parser.parse_args()
 
     EXPERIMENT_NAME = args.experiment_name
@@ -435,7 +483,7 @@ if __name__ == "__main__":
     DATASET_NUM_SPLITS = args.dataset_num_splits
     DATASET_SPLIT_INDEX = args.dataset_split_index
     OUTPUT_DIR = f"./outputs/{EXPERIMENT_NAME}"
-    UNFREEZE_BACKBONES = True if args.unfreeze_backbones else False
+    PRETRAIN = True if args.pretrain else False
 
     # initialize wandb
     wandb.login(key=config.WANDB_KEY)
@@ -445,7 +493,8 @@ if __name__ == "__main__":
     ds, image_root = create_dataset(
         overfit_check=OVERFIT_CHECK, 
         dataset_num_splits = DATASET_NUM_SPLITS, 
-        dataset_split_index = DATASET_SPLIT_INDEX
+        dataset_split_index = DATASET_SPLIT_INDEX,
+        pretraining=PRETRAIN
     )
 
     # load vision model
@@ -466,14 +515,13 @@ if __name__ == "__main__":
 
     # load whole model now
     model = CustomVLM(vision_model, processor, language_model, tokenizer, proj_layer, image_token_id)
-    if not UNFREEZE_BACKBONES:
-        model.freeze_backbones()
+    model.freeze_backbones()
     collator = CustomVLMCollator(tokenizer, processor, image_root)
 
     training_args = TrainingArguments(
         output_dir=OUTPUT_DIR,
-        per_device_train_batch_size=8,
-        per_device_eval_batch_size=16,
+        per_device_train_batch_size=12,
+        per_device_eval_batch_size=12,
         gradient_accumulation_steps=4,
         learning_rate=LR,
         num_train_epochs=EPOCHS,
@@ -485,12 +533,11 @@ if __name__ == "__main__":
         warmup_ratio=0.03,
         seed=SEED,
         save_total_limit=2,
-        eval_strategy="steps",
-        eval_steps=5000, # making this large because it takes 1hr+ to run, and so i've also set load best model at end = false
+        eval_strategy="epoch",
         logging_strategy="steps",
         logging_steps=100,
         save_strategy="steps",
-        save_steps=100
+        save_steps=50
     )
 
     trainer = ProjectorOnlyTrainer(
@@ -500,7 +547,7 @@ if __name__ == "__main__":
         eval_dataset=ds["eval"],
         data_collator=collator,
     )
-    trainer.add_callback(GenEvalCallback(trainer, ds["eval"], image_root, tokenizer, processor, OVERFIT_CHECK))
+    trainer.add_callback(GenEvalCallback(trainer, ds["eval"], image_root, tokenizer, processor, OVERFIT_CHECK, PRETRAIN))
 
     # not resuming from checkpoint, as we're only saving the proj layer weights
     # we cant simply just load those, we'd need to save the scheduler, optim states too and im lazy
@@ -515,7 +562,7 @@ if __name__ == "__main__":
     print("finished training!")
 
     # do final eval on best model just to double check
-    run_generation_eval(model, ds["eval"], image_root, tokenizer, processor)
+    run_generation_eval(model, ds["eval"], image_root, tokenizer, processor, PRETRAIN)
 
     run.finish()
     print("done!")
