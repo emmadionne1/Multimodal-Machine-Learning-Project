@@ -535,7 +535,7 @@ if __name__ == "__main__":
         save_total_limit=2,
         eval_strategy="epoch",
         logging_strategy="steps",
-        logging_steps=100,
+        logging_steps=5,
         save_strategy="steps",
         save_steps=50
     )

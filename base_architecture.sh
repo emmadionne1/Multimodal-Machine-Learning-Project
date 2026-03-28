@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --time=10:00:00
 #SBATCH --mem=48G
-#SBATCH --gpus=3
+#SBATCH --gpus=1
 #SBATCH --ntasks=1
 
 case "$SLURM_ARRAY_TASK_ID" in
@@ -18,7 +18,7 @@ case "$SLURM_ARRAY_TASK_ID" in
     ;;
   2)
     LOG_NAME="v_large_lr"
-    CMD=(python3 base_architecture.py --experiment_name v_large_lr --lr 1e-4 --epochs 1 --pretrain)
+    CMD=(python3 base_architecture.py --experiment_name v_large_lr_1_gpu --lr 1e-4 --epochs 1 --pretrain)
     ;;
   3)
     LOG_NAME="v_large_lr_backup"
@@ -58,8 +58,8 @@ case "$SLURM_ARRAY_TASK_ID" in
     ;;
 esac
 
-OUT_FILE="slurm/${LOG_NAME}.out"
-ERR_FILE="slurm/${LOG_NAME}.err"
+OUT_FILE="slurm/${LOG_NAME}4.out"
+ERR_FILE="slurm/${LOG_NAME}4.err"
 
 mkdir -p slurm
 
@@ -72,7 +72,7 @@ exec >"$OUT_FILE" 2>"$ERR_FILE"
 
 source "$HOME/.bashrc"
 conda init
-conda activate mmml
+conda activate bsampling
 cd "$HOME/Multimodal-Machine-Learning-Project"
 
 echo "SLURM_ARRAY_TASK_ID=$SLURM_ARRAY_TASK_ID"
@@ -82,7 +82,7 @@ nvidia-smi --query-gpu=pci.bus_id
 nvidia-smi -q -d PAGE_RETIREMENT
 nvidia-smi
 
-export HF_HOME="/data/user_data/mbairath/.hf_cache"
+export HF_HOME="/data/user_data/bsood/.hf_cache"
 export HF_HUB_CACHE="/data/hf_cache/hub"
 export HF_DATASETS_CACHE="/data/hf_cache/datasets"
 
