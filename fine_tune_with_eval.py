@@ -118,7 +118,7 @@ def main():
     output_dir = f"./outputs/{args.experiment_name}"
     training_args = TrainingArguments(
         output_dir=output_dir,
-        per_device_train_batch_size=12,
+        per_device_train_batch_size=14,
         per_device_eval_batch_size=12,
         gradient_accumulation_steps=4,
         learning_rate=args.lr,
@@ -194,12 +194,7 @@ def main():
                 )
                 
             prediction = prediction_text.strip()
-            print("\n" + "="*50)
-            print(f"\nPrompt: {prompt_text}")
-            print(f"Ground Truth: {ground_truth}")
-            print(f"Prediction: {prediction}")
-            print("\n" + "="*50,"\n")
-
+            
             # Evaluate using the standard ChartQA logic
             if is_answer_correct_relaxed(prediction, ground_truth):
                 correct += 1
