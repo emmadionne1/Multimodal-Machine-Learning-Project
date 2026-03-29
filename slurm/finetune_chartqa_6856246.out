@@ -1,0 +1,124 @@
+no change     /home/bsood/miniconda3/condabin/conda
+no change     /home/bsood/miniconda3/bin/conda
+no change     /home/bsood/miniconda3/bin/conda-env
+no change     /home/bsood/miniconda3/bin/activate
+no change     /home/bsood/miniconda3/bin/deactivate
+no change     /home/bsood/miniconda3/etc/profile.d/conda.sh
+no change     /home/bsood/miniconda3/etc/fish/conf.d/conda.fish
+no change     /home/bsood/miniconda3/shell/condabin/Conda.psm1
+no change     /home/bsood/miniconda3/shell/condabin/conda-hook.ps1
+no change     /home/bsood/miniconda3/lib/python3.13/site-packages/xontrib/conda.xsh
+no change     /home/bsood/miniconda3/etc/profile.d/conda.csh
+no change     /home/bsood/.bashrc
+No action taken.
+Starting ChartQA Fine-Tuning
+Using Projector Weights: /home/bsood/Multimodal-Machine-Learning-Project/outputs/v_large_lr_1_gpu/checkpoint-10465/mihika_projector_1e4.pt
+Sat Mar 28 17:00:03 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 575.51.03              Driver Version: 575.51.03      CUDA Version: 12.9     |
+|-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA RTX 6000 Ada Gene...    On  |   00000000:87:00.0 Off |                  Off |
+| 30%   29C    P8             25W /  300W |       2MiB /  49140MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+                                                                                         
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+DatasetDict({
+    train: Dataset({
+        features: ['image', 'query', 'label', 'human_or_machine', 'prompt', 'completion'],
+        num_rows: 28299
+    })
+    eval: Dataset({
+        features: ['image', 'query', 'label', 'human_or_machine', 'prompt', 'completion'],
+        num_rows: 1920
+    })
+    test: Dataset({
+        features: ['image', 'query', 'label', 'human_or_machine', 'prompt', 'completion'],
+        num_rows: 2500
+    })
+})
+{'image': <PIL.PngImagePlugin.PngImageFile image mode=RGB size=422x359 at 0x1519AAB57A00>, 'query': 'Is the value of Favorable 38 in 2015?', 'label': ['Yes'], 'human_or_machine': 0, 'prompt': '<image>\nYou are a chart question-answering assistant. Respond with the final answer only, no explanations.\nQuestion: Is the value of Favorable 38 in 2015?\nAnswer:', 'completion': 'Yes'}
+Loading Vision: google/siglip2-so400m-patch16-512
+Loading LLM: Qwen/Qwen3-4B-Instruct-2507
+Loading pre-trained projector weights from: /home/bsood/Multimodal-Machine-Learning-Project/outputs/v_large_lr_1_gpu/checkpoint-10465/mihika_projector_1e4.pt
+
+==================================================
+EXAMPLE PROMPT TO THE MODEL:
+<|im_start|>user
+<image>
+You are a chart question-answering assistant. Respond with the final answer only, no explanations.
+Question: Is the value of Favorable 38 in 2015?
+Answer:<|im_end|>
+<|im_start|>assistant
+Yes<|im_end|>
+
+
+EXAMPLE LABELS (What we calculate loss on):
+Raw label IDs (ignoring -100): [9454, 151645, 198]
+Decoded target text: 'Yes<|im_end|>
+'
+==================================================
+
+
+==================================================
+EXAMPLE BATCH FROM COLLATOR:
+Batch input_ids shape: torch.Size([4, 61])
+Batch labels shape: torch.Size([4, 61])
+Batch attention_mask shape: torch.Size([4, 61])
+
+--- Example 1 ---
+DECODED INPUT_IDS (Actual model input, notice the padding at the end if sequence is shorter):
+'<|im_start|>user\n<image>\nYou are a chart question-answering assistant. Respond with the final answer only, no explanations.\nQuestion: Is the value of Favorable 38 in 2015?\nAnswer:<|im_end|>\n<|im_start|>assistant\nYes<|im_end|>\n<|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|>'
+
+DECODED LABELS (What loss is calculated on):
+'Yes<|im_end|>\n'
+
+Raw Label IDs (First 10): [-100, -100, -100, -100, -100, -100, -100, -100, -100, -100]
+Raw Label IDs (Last 10):  [9454, 151645, 198, -100, -100, -100, -100, -100, -100, -100]
+
+--- Example 2 ---
+DECODED INPUT_IDS (Actual model input, notice the padding at the end if sequence is shorter):
+'<|im_start|>user\n<image>\nYou are a chart question-answering assistant. Respond with the final answer only, no explanations.\nQuestion: How many values are below 40 in Unfavorable graph?\nAnswer:<|im_end|>\n<|im_start|>assistant\n6<|im_end|>\n<|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|>'
+
+DECODED LABELS (What loss is calculated on):
+'6<|im_end|>\n'
+
+Raw Label IDs (First 10): [-100, -100, -100, -100, -100, -100, -100, -100, -100, -100]
+Raw Label IDs (Last 10):  [198, -100, -100, -100, -100, -100, -100, -100, -100, -100]
+
+--- Example 3 ---
+DECODED INPUT_IDS (Actual model input, notice the padding at the end if sequence is shorter):
+'<|im_start|>user\n<image>\nYou are a chart question-answering assistant. Respond with the final answer only, no explanations.\nQuestion: In which year the value was 51?\nAnswer:<|im_end|>\n<|im_start|>assistant\n2014<|im_end|>\n<|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|>'
+
+DECODED LABELS (What loss is calculated on):
+'2014<|im_end|>\n'
+
+Raw Label IDs (First 10): [-100, -100, -100, -100, -100, -100, -100, -100, -100, -100]
+Raw Label IDs (Last 10):  [-100, -100, -100, -100, -100, -100, -100, -100, -100, -100]
+
+--- Example 4 ---
+DECODED INPUT_IDS (Actual model input, notice the padding at the end if sequence is shorter):
+'<|im_start|>user\n<image>\nYou are a chart question-answering assistant. Respond with the final answer only, no explanations.\nQuestion: What is the sum favourable  value in the year 2014 and 2015?\nAnswer:<|im_end|>\n<|im_start|>assistant\n95<|im_end|>\n'
+
+DECODED LABELS (What loss is calculated on):
+'95<|im_end|>\n'
+
+Raw Label IDs (First 10): [-100, -100, -100, -100, -100, -100, -100, -100, -100, -100]
+Raw Label IDs (Last 10):  [-100, -100, -100, -100, -100, -100, 24, 20, 151645, 198]
+==================================================
+
+Train batches per epoch: 2022
+Optimizer steps per epoch: 506
+Total optimizer steps: 1518
+Num epochs: 3
+Starting ChartQA Fine-tuning!

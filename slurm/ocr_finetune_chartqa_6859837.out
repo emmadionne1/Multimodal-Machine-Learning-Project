@@ -1,0 +1,286 @@
+no change     /home/bsood/miniconda3/condabin/conda
+no change     /home/bsood/miniconda3/bin/conda
+no change     /home/bsood/miniconda3/bin/conda-env
+no change     /home/bsood/miniconda3/bin/activate
+no change     /home/bsood/miniconda3/bin/deactivate
+no change     /home/bsood/miniconda3/etc/profile.d/conda.sh
+no change     /home/bsood/miniconda3/etc/fish/conf.d/conda.fish
+no change     /home/bsood/miniconda3/shell/condabin/Conda.psm1
+no change     /home/bsood/miniconda3/shell/condabin/conda-hook.ps1
+no change     /home/bsood/miniconda3/lib/python3.13/site-packages/xontrib/conda.xsh
+no change     /home/bsood/miniconda3/etc/profile.d/conda.csh
+no change     /home/bsood/.bashrc
+No action taken.
+==================================================
+Starting ChartQA EasyOCR Pipeline
+Checkpoint: /home/bsood/Multimodal-Machine-Learning-Project/outputs/chartqa_finetune_bhavesh_pretrained/checkpoint-2950/projector.pt
+==================================================
+Sat Mar 28 22:42:05 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 575.51.03              Driver Version: 575.51.03      CUDA Version: 12.9     |
+|-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA RTX PRO 6000 Blac...    On  |   00000000:5E:00.0 Off |                    0 |
+| N/A   28C    P8             33W /  600W |       0MiB /  97887MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+                                                                                         
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+Loading raw HuggingFace ChartQA dataset...
+Initializing EasyOCR on GPU...
+
+--- STEP 1: Precomputing OCR for Test Set ---
+Loading Vision: google/siglip2-so400m-patch16-512
+Loading LLM: Qwen/Qwen3-4B-Instruct-2507
+Loading pre-trained projector weights from: /home/bsood/Multimodal-Machine-Learning-Project/outputs/chartqa_finetune_bhavesh_pretrained/checkpoint-2950/projector.pt
+
+--- STEP 2: Pre-Training Evaluation ---
+
+==================================================
+[Pre-Train] Evaluating Generative Relaxed Accuracy on Test Set...
+
+--- SAMPLE EVALUATION PROMPT (Index 0) ---
+<|im_start|>user
+<image>
+You are given the image and it's text extracted from a chart via OCR:
+index in food commodities, 1850-2015, World, 1934
+Long-term
+price
+Our World
+Data
+Commodity price index in food items dating 1850-2015,
+measured relative t0 real prices in 1900 (ie. 1900
+100).
+Lamb
+103.
+103.13
+Corn
+Barley
+102.45
+Rye
+87.37
+Beef
+85.27
+Wheat
+83.73
+Coffee
+82.2
+Tea
+68.48
+Peanuts
+64.71
+Palm oil
+57.6
+55.36
+Pork
+Rice
+42.48
+25.56
+Sugar
+cocoa
+18.81
+20
+100
+CC BY
+Source: Commodity Prices since 1850
+Jacks (2016)
+OurW NorldlnData org food-prices/ -
+You are a chart question-answering assistant. Respond with the final answer only, no explanations.
+Question: How many food item is shown in the bar graph?
+Answer:<|im_end|>
+<|im_start|>assistant
+
+------------------------------------------
+
+
+[Pre-Train] Final Test Set Relaxed Accuracy: 61.84% (1546/2500)
+==================================================
+
+
+--- STEP 3: Precomputing OCR for Training Sets ---
+Cleaning up EasyOCR to free VRAM...
+
+--- STEP 4: Training for 1 Epoch ---
+
+==================================================
+SHOWCASING EXACT TRAINING BATCH (BATCH SIZE 2):
+
+--- Batch Item 1 ---
+DECODED INPUT_IDS (What the model sees):
+"<|im_start|>user\n<image>\nYou are given the image and it's text extracted from a chart via OCR:\nAmericans Give China Mostly Negative Ratings\nC,S, views 0f China\n803\nUnfavorable\nFavorable\n2005\n2007\n2009\n2011\n2013\n2015\nSpring 2015 Global Attitudessurvey Q12b.\nSouice;\nPEW RESEARCH CENTER\nYou are a chart question-answering assistant. Respond with the final answer only, no explanations.\nQuestion: Is the value of Favorable 38 in 2015?\nAnswer:<|im_end|>\n<|im_start|>assistant\nYes<|im_end|>\n"
+
+DECODED LABELS (What the loss is calculated on):
+'Yes<|im_end|>\n'
+
+--- Batch Item 2 ---
+DECODED INPUT_IDS (What the model sees):
+"<|im_start|>user\n<image>\nYou are given the image and it's text extracted from a chart via OCR:\nAmericans Give China Mostly Negative Ratings\nC,S, views 0f China\n803\nUnfavorable\nFavorable\n2005\n2007\n2009\n2011\n2013\n2015\nSpring 2015 Global Attitudessurvey Q12b.\nSouice;\nPEW RESEARCH CENTER\nYou are a chart question-answering assistant. Respond with the final answer only, no explanations.\nQuestion: How many values are below 40 in Unfavorable graph?\nAnswer:<|im_end|>\n<|im_start|>assistant\n6<|im_end|>\n<|endoftext|><|endoftext|>"
+
+DECODED LABELS (What the loss is calculated on):
+'6<|im_end|>\n'
+==================================================
+
+{'loss': 1.7222, 'grad_norm': 15.625, 'learning_rate': 1e-05, 'epoch': 0.01}
+{'loss': 1.4536, 'grad_norm': 20.0, 'learning_rate': 2.111111111111111e-05, 'epoch': 0.02}
+{'loss': 1.5414, 'grad_norm': 11.25, 'learning_rate': 3.222222222222223e-05, 'epoch': 0.03}
+{'loss': 1.3795, 'grad_norm': 13.0625, 'learning_rate': 4.3333333333333334e-05, 'epoch': 0.05}
+{'loss': 1.2595, 'grad_norm': 13.125, 'learning_rate': 4.999720254525684e-05, 'epoch': 0.06}
+{'loss': 1.084, 'grad_norm': 6.5, 'learning_rate': 4.996573836886435e-05, 'epoch': 0.07}
+{'loss': 1.4786, 'grad_norm': 10.5, 'learning_rate': 4.989935734988098e-05, 'epoch': 0.08}
+{'loss': 1.3124, 'grad_norm': 19.875, 'learning_rate': 4.979815232816416e-05, 'epoch': 0.09}
+{'loss': 1.2312, 'grad_norm': 9.25, 'learning_rate': 4.9662264848088034e-05, 'epoch': 0.1}
+{'loss': 1.3008, 'grad_norm': 11.625, 'learning_rate': 4.9491884960580894e-05, 'epoch': 0.11}
+{'loss': 1.4448, 'grad_norm': 13.375, 'learning_rate': 4.928725095732169e-05, 'epoch': 0.12}
+{'loss': 1.3604, 'grad_norm': 14.0, 'learning_rate': 4.904864903746765e-05, 'epoch': 0.14}
+{'loss': 1.2857, 'grad_norm': 11.25, 'learning_rate': 4.877641290737884e-05, 'epoch': 0.15}
+{'loss': 1.2227, 'grad_norm': 9.9375, 'learning_rate': 4.847092331389965e-05, 'epoch': 0.16}
+{'loss': 1.074, 'grad_norm': 19.0, 'learning_rate': 4.813260751184992e-05, 'epoch': 0.17}
+{'loss': 1.3584, 'grad_norm': 10.1875, 'learning_rate': 4.7761938666470403e-05, 'epoch': 0.18}
+{'loss': 1.2176, 'grad_norm': 9.125, 'learning_rate': 4.7359435191658425e-05, 'epoch': 0.19}
+{'loss': 1.2233, 'grad_norm': 6.625, 'learning_rate': 4.692566002491917e-05, 'epoch': 0.2}
+{'loss': 1.1233, 'grad_norm': 12.5625, 'learning_rate': 4.6461219840046654e-05, 'epoch': 0.21}
+{'loss': 1.1288, 'grad_norm': 12.3125, 'learning_rate': 4.5966764198635606e-05, 'epoch': 0.23}
+{'loss': 1.1321, 'grad_norm': 18.625, 'learning_rate': 4.544298464161079e-05, 'epoch': 0.24}
+{'loss': 1.3834, 'grad_norm': 17.75, 'learning_rate': 4.489061372204453e-05, 'epoch': 0.25}
+{'loss': 1.4497, 'grad_norm': 14.8125, 'learning_rate': 4.431042398061499e-05, 'epoch': 0.26}
+{'loss': 1.3548, 'grad_norm': 9.6875, 'learning_rate': 4.370322686513818e-05, 'epoch': 0.27}
+{'loss': 1.1802, 'grad_norm': 11.0625, 'learning_rate': 4.306987159568479e-05, 'epoch': 0.28}
+{'loss': 1.1387, 'grad_norm': 8.4375, 'learning_rate': 4.2411243976869175e-05, 'epoch': 0.29}
+{'loss': 1.2088, 'grad_norm': 10.875, 'learning_rate': 4.172826515897146e-05, 'epoch': 0.31}
+{'loss': 1.1809, 'grad_norm': 15.375, 'learning_rate': 4.10218903496256e-05, 'epoch': 0.32}
+{'loss': 1.2575, 'grad_norm': 13.1875, 'learning_rate': 4.029310747787516e-05, 'epoch': 0.33}
+{'loss': 1.2401, 'grad_norm': 9.9375, 'learning_rate': 3.9542935812465146e-05, 'epoch': 0.34}
+{'loss': 1.294, 'grad_norm': 14.0625, 'learning_rate': 3.8772424536302564e-05, 'epoch': 0.35}
+{'loss': 1.2648, 'grad_norm': 7.90625, 'learning_rate': 3.798265127907923e-05, 'epoch': 0.36}
+{'loss': 1.0943, 'grad_norm': 11.375, 'learning_rate': 3.717472061010918e-05, 'epoch': 0.37}
+{'loss': 1.3918, 'grad_norm': 11.5, 'learning_rate': 3.634976249348867e-05, 'epoch': 0.38}
+{'loss': 1.2232, 'grad_norm': 16.125, 'learning_rate': 3.550893070773914e-05, 'epoch': 0.4}
+{'loss': 1.1063, 'grad_norm': 13.5, 'learning_rate': 3.4653401232143655e-05, 'epoch': 0.41}
+{'loss': 1.16, 'grad_norm': 10.375, 'learning_rate': 3.378437060203357e-05, 'epoch': 0.42}
+{'loss': 1.0748, 'grad_norm': 9.375, 'learning_rate': 3.2903054235325615e-05, 'epoch': 0.43}
+{'loss': 1.1945, 'grad_norm': 13.125, 'learning_rate': 3.201068473265007e-05, 'epoch': 0.44}
+{'loss': 1.278, 'grad_norm': 8.9375, 'learning_rate': 3.110851015344735e-05, 'epoch': 0.45}
+{'loss': 1.362, 'grad_norm': 9.3125, 'learning_rate': 3.0197792270443982e-05, 'epoch': 0.46}
+{'loss': 1.2903, 'grad_norm': 11.375, 'learning_rate': 2.9279804804949384e-05, 'epoch': 0.47}
+{'loss': 0.8375, 'grad_norm': 11.4375, 'learning_rate': 2.8355831645441388e-05, 'epoch': 0.49}
+{'loss': 1.281, 'grad_norm': 16.875, 'learning_rate': 2.7427165051932208e-05, 'epoch': 0.5}
+{'loss': 1.2698, 'grad_norm': 10.5625, 'learning_rate': 2.649510384862586e-05, 'epoch': 0.51}
+{'loss': 1.2702, 'grad_norm': 13.625, 'learning_rate': 2.556095160739513e-05, 'epoch': 0.52}
+{'loss': 1.3301, 'grad_norm': 13.0625, 'learning_rate': 2.4626014824618415e-05, 'epoch': 0.53}
+{'loss': 1.1598, 'grad_norm': 8.25, 'learning_rate': 2.3691601093926404e-05, 'epoch': 0.54}
+{'loss': 1.4575, 'grad_norm': 7.34375, 'learning_rate': 2.2759017277414166e-05, 'epoch': 0.55}
+{'loss': 1.0952, 'grad_norm': 11.875, 'learning_rate': 2.18295676778763e-05, 'epoch': 0.57}
+{'loss': 1.1925, 'grad_norm': 9.75, 'learning_rate': 2.090455221462156e-05, 'epoch': 0.58}
+{'loss': 1.0094, 'grad_norm': 12.5625, 'learning_rate': 1.9985264605418183e-05, 'epoch': 0.59}
+{'loss': 1.313, 'grad_norm': 9.9375, 'learning_rate': 1.9072990557112564e-05, 'epoch': 0.6}
+{'loss': 1.3069, 'grad_norm': 11.25, 'learning_rate': 1.8169005967452e-05, 'epoch': 0.61}
+{'loss': 1.0077, 'grad_norm': 11.5625, 'learning_rate': 1.7274575140626318e-05, 'epoch': 0.62}
+{'loss': 1.1843, 'grad_norm': 9.4375, 'learning_rate': 1.639094901902412e-05, 'epoch': 0.63}
+{'loss': 1.0893, 'grad_norm': 12.375, 'learning_rate': 1.551936343367679e-05, 'epoch': 0.64}
+{'loss': 1.1353, 'grad_norm': 10.9375, 'learning_rate': 1.466103737583699e-05, 'epoch': 0.66}
+{'loss': 1.2843, 'grad_norm': 13.75, 'learning_rate': 1.3817171292109183e-05, 'epoch': 0.67}
+{'loss': 1.3732, 'grad_norm': 14.3125, 'learning_rate': 1.2988945405516568e-05, 'epoch': 0.68}
+{'loss': 1.197, 'grad_norm': 12.1875, 'learning_rate': 1.217751806485235e-05, 'epoch': 0.69}
+{'loss': 1.4307, 'grad_norm': 15.3125, 'learning_rate': 1.1384024124624324e-05, 'epoch': 0.7}
+{'loss': 1.0465, 'grad_norm': 9.25, 'learning_rate': 1.0609573357858166e-05, 'epoch': 0.71}
+{'loss': 1.0691, 'grad_norm': 11.375, 'learning_rate': 9.855248903979506e-06, 'epoch': 0.72}
+{'loss': 1.1938, 'grad_norm': 8.625, 'learning_rate': 9.122105753945531e-06, 'epoch': 0.73}
+{'loss': 1.2156, 'grad_norm': 15.375, 'learning_rate': 8.411169274744723e-06, 'epoch': 0.75}
+{'loss': 1.3538, 'grad_norm': 9.3125, 'learning_rate': 7.723433775328384e-06, 'epoch': 0.76}
+{'loss': 1.3417, 'grad_norm': 10.8125, 'learning_rate': 7.059861115979702e-06, 'epoch': 0.77}
+{'loss': 1.1508, 'grad_norm': 10.125, 'learning_rate': 6.421379363065142e-06, 'epoch': 0.78}
+{'loss': 1.3982, 'grad_norm': 10.4375, 'learning_rate': 5.808881491049723e-06, 'epoch': 0.79}
+{'loss': 1.2437, 'grad_norm': 6.71875, 'learning_rate': 5.223224133591476e-06, 'epoch': 0.8}
+{'loss': 1.0885, 'grad_norm': 12.25, 'learning_rate': 4.665226385461802e-06, 'epoch': 0.81}
+{'loss': 1.2131, 'grad_norm': 12.5625, 'learning_rate': 4.135668656967434e-06, 'epoch': 0.83}
+{'loss': 1.1762, 'grad_norm': 10.6875, 'learning_rate': 3.635291582475964e-06, 'epoch': 0.84}
+{'loss': 1.1465, 'grad_norm': 7.375, 'learning_rate': 3.164794984571759e-06, 'epoch': 0.85}
+{'loss': 1.1606, 'grad_norm': 13.8125, 'learning_rate': 2.7248368952908053e-06, 'epoch': 0.86}
+{'loss': 1.1881, 'grad_norm': 11.0625, 'learning_rate': 2.316032635803378e-06, 'epoch': 0.87}
+{'loss': 1.0402, 'grad_norm': 7.375, 'learning_rate': 1.938953955831771e-06, 'epoch': 0.88}
+{'loss': 1.2673, 'grad_norm': 12.4375, 'learning_rate': 1.59412823400657e-06, 'epoch': 0.89}
+{'loss': 1.0233, 'grad_norm': 8.375, 'learning_rate': 1.2820377402800065e-06, 'epoch': 0.9}
+{'loss': 1.1824, 'grad_norm': 12.375, 'learning_rate': 1.0031189614277765e-06, 'epoch': 0.92}
+{'loss': 1.1125, 'grad_norm': 10.875, 'learning_rate': 7.577619905828282e-07, 'epoch': 0.93}
+{'loss': 0.9814, 'grad_norm': 10.0625, 'learning_rate': 5.463099816548579e-07, 'epoch': 0.94}
+{'loss': 1.0432, 'grad_norm': 8.25, 'learning_rate': 3.6905866939851983e-07, 'epoch': 0.95}
+{'loss': 1.1112, 'grad_norm': 8.5, 'learning_rate': 2.262559558016325e-07, 'epoch': 0.96}
+{'loss': 1.2977, 'grad_norm': 10.9375, 'learning_rate': 1.1810156337183908e-07, 'epoch': 0.97}
+{'loss': 1.2349, 'grad_norm': 11.0, 'learning_rate': 4.474675580662113e-08, 'epoch': 0.98}
+{'loss': 1.0031, 'grad_norm': 5.75, 'learning_rate': 6.294126437336734e-09, 'epoch': 0.99}
+{'eval_loss': 0.593572199344635, 'eval_runtime': 68.2142, 'eval_samples_per_second': 28.147, 'eval_steps_per_second': 3.518, 'epoch': 1.0}
+{'train_runtime': 2442.1209, 'train_samples_per_second': 11.588, 'train_steps_per_second': 0.362, 'train_loss': 1.2268747135744256, 'epoch': 1.0}
+
+--- STEP 5: Post-Training Evaluation ---
+
+==================================================
+[Post-Train] Evaluating Generative Relaxed Accuracy on Test Set...
+
+--- SAMPLE EVALUATION PROMPT (Index 0) ---
+<|im_start|>user
+<image>
+You are given the image and it's text extracted from a chart via OCR:
+index in food commodities, 1850-2015, World, 1934
+Long-term
+price
+Our World
+Data
+Commodity price index in food items dating 1850-2015,
+measured relative t0 real prices in 1900 (ie. 1900
+100).
+Lamb
+103.
+103.13
+Corn
+Barley
+102.45
+Rye
+87.37
+Beef
+85.27
+Wheat
+83.73
+Coffee
+82.2
+Tea
+68.48
+Peanuts
+64.71
+Palm oil
+57.6
+55.36
+Pork
+Rice
+42.48
+25.56
+Sugar
+cocoa
+18.81
+20
+100
+CC BY
+Source: Commodity Prices since 1850
+Jacks (2016)
+OurW NorldlnData org food-prices/ -
+You are a chart question-answering assistant. Respond with the final answer only, no explanations.
+Question: How many food item is shown in the bar graph?
+Answer:<|im_end|>
+<|im_start|>assistant
+
+------------------------------------------
+
+
+[Post-Train] Final Test Set Relaxed Accuracy: 62.04% (1551/2500)
+==================================================
+
+Full OCR pipeline complete.
+Job finished.

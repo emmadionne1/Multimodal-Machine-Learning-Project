@@ -1,10 +1,8 @@
 // Folders
 __pycache__/
 node_modules/
-slurm/
 .ipynb_checkpoints/
 .conda/
-outputs/
 wandb/
 
 // Miscellaneous files

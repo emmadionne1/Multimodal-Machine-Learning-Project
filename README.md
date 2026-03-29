@@ -13,7 +13,7 @@ The model is trained on the HuggingFace ChartQA dataset and evaluated using accu
 
 ---
 
-## 📁 Project Structure
+## 📁 Project Structure 
 
 ### Core Scripts
 

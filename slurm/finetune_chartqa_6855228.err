@@ -1,0 +1,70 @@
+wandb: [wandb.login()] Using explicit session credentials for https://api.wandb.ai.
+wandb: Appending key for api.wandb.ai to your netrc file: /home/bsood/.netrc
+wandb: Currently logged in as: bhavesh13 to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run ekua1zcp
+wandb: Tracking run with wandb version 0.25.1
+wandb: Run data is saved locally in /home/bsood/Multimodal-Machine-Learning-Project/wandb/run-20260328_150846-ekua1zcp
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run chartqa_finetune_v1
+wandb: ⭐️ View project at https://wandb.ai/bhavesh13/vlm_finetuning
+wandb: 🚀 View run at https://wandb.ai/bhavesh13/vlm_finetuning/runs/ekua1zcp
+Using the latest cached version of the dataset since HuggingFaceM4/ChartQA couldn't be found on the Hugging Face Hub
+Found the latest cached dataset configuration 'default' at /data/hf_cache/datasets/HuggingFaceM4___chart_qa/default/0.0.0/b605b6e08b57faf4359aeb2fe6a3ca595f99b6c5 (last modified on Thu Mar 26 19:05:12 2026).
+Traceback (most recent call last):
+  File "/home/bsood/miniconda3/envs/bsampling/lib/python3.10/site-packages/filelock/_unix.py", line 55, in _acquire
+    fd = os.open(self.lock_file, open_flags, open_mode)
+PermissionError: [Errno 13] Permission denied: '/data/hf_cache/datasets/_data_hf_cache_datasets_HuggingFaceM4___chart_qa_default_0.0.0_b605b6e08b57faf4359aeb2fe6a3ca595f99b6c5.lock'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/bsood/Multimodal-Machine-Learning-Project/finetune_chartqa.py", line 116, in <module>
+    main()
+  File "/home/bsood/Multimodal-Machine-Learning-Project/finetune_chartqa.py", line 31, in main
+    ds, image_root = create_dataset(pretraining=False)
+  File "/home/bsood/Multimodal-Machine-Learning-Project/base_architecture.py", line 47, in create_dataset
+    raw = load_dataset("HuggingFaceM4/ChartQA")
+  File "/home/bsood/miniconda3/envs/bsampling/lib/python3.10/site-packages/datasets/load.py", line 1485, in load_dataset
+    builder_instance = load_dataset_builder(
+  File "/home/bsood/miniconda3/envs/bsampling/lib/python3.10/site-packages/datasets/load.py", line 1164, in load_dataset_builder
+    builder_instance: DatasetBuilder = builder_cls(
+  File "/home/bsood/miniconda3/envs/bsampling/lib/python3.10/site-packages/datasets/packaged_modules/cache/cache.py", line 134, in __init__
+    super().__init__(
+  File "/home/bsood/miniconda3/envs/bsampling/lib/python3.10/site-packages/datasets/builder.py", line 389, in __init__
+    with FileLock(lock_path):
+  File "/home/bsood/miniconda3/envs/bsampling/lib/python3.10/site-packages/filelock/_api.py", line 550, in __enter__
+    self.acquire()
+  File "/home/bsood/miniconda3/envs/bsampling/lib/python3.10/site-packages/filelock/_api.py", line 498, in acquire
+    self._acquire()
+  File "/home/bsood/miniconda3/envs/bsampling/lib/python3.10/site-packages/filelock/_unix.py", line 69, in _acquire
+    fd = os.open(self.lock_file, open_flags & ~os.O_CREAT, open_mode)
+PermissionError: [Errno 13] Permission denied: '/data/hf_cache/datasets/_data_hf_cache_datasets_HuggingFaceM4___chart_qa_default_0.0.0_b605b6e08b57faf4359aeb2fe6a3ca595f99b6c5.lock'
+Traceback (most recent call last):
+  File "/home/bsood/miniconda3/envs/bsampling/lib/python3.10/site-packages/filelock/_unix.py", line 55, in _acquire
+    fd = os.open(self.lock_file, open_flags, open_mode)
+PermissionError: [Errno 13] Permission denied: '/data/hf_cache/datasets/_data_hf_cache_datasets_HuggingFaceM4___chart_qa_default_0.0.0_b605b6e08b57faf4359aeb2fe6a3ca595f99b6c5.lock'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/bsood/Multimodal-Machine-Learning-Project/finetune_chartqa.py", line 116, in <module>
+    main()
+  File "/home/bsood/Multimodal-Machine-Learning-Project/finetune_chartqa.py", line 31, in main
+    ds, image_root = create_dataset(pretraining=False)
+  File "/home/bsood/Multimodal-Machine-Learning-Project/base_architecture.py", line 47, in create_dataset
+    raw = load_dataset("HuggingFaceM4/ChartQA")
+  File "/home/bsood/miniconda3/envs/bsampling/lib/python3.10/site-packages/datasets/load.py", line 1485, in load_dataset
+    builder_instance = load_dataset_builder(
+  File "/home/bsood/miniconda3/envs/bsampling/lib/python3.10/site-packages/datasets/load.py", line 1164, in load_dataset_builder
+    builder_instance: DatasetBuilder = builder_cls(
+  File "/home/bsood/miniconda3/envs/bsampling/lib/python3.10/site-packages/datasets/packaged_modules/cache/cache.py", line 134, in __init__
+    super().__init__(
+  File "/home/bsood/miniconda3/envs/bsampling/lib/python3.10/site-packages/datasets/builder.py", line 389, in __init__
+    with FileLock(lock_path):
+  File "/home/bsood/miniconda3/envs/bsampling/lib/python3.10/site-packages/filelock/_api.py", line 550, in __enter__
+    self.acquire()
+  File "/home/bsood/miniconda3/envs/bsampling/lib/python3.10/site-packages/filelock/_api.py", line 498, in acquire
+    self._acquire()
+  File "/home/bsood/miniconda3/envs/bsampling/lib/python3.10/site-packages/filelock/_unix.py", line 69, in _acquire
+    fd = os.open(self.lock_file, open_flags & ~os.O_CREAT, open_mode)
+PermissionError: [Errno 13] Permission denied: '/data/hf_cache/datasets/_data_hf_cache_datasets_HuggingFaceM4___chart_qa_default_0.0.0_b605b6e08b57faf4359aeb2fe6a3ca595f99b6c5.lock'

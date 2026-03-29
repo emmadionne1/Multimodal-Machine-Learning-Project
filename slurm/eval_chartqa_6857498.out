@@ -1,0 +1,62 @@
+no change     /home/bsood/miniconda3/condabin/conda
+no change     /home/bsood/miniconda3/bin/conda
+no change     /home/bsood/miniconda3/bin/conda-env
+no change     /home/bsood/miniconda3/bin/activate
+no change     /home/bsood/miniconda3/bin/deactivate
+no change     /home/bsood/miniconda3/etc/profile.d/conda.sh
+no change     /home/bsood/miniconda3/etc/fish/conf.d/conda.fish
+no change     /home/bsood/miniconda3/shell/condabin/Conda.psm1
+no change     /home/bsood/miniconda3/shell/condabin/conda-hook.ps1
+no change     /home/bsood/miniconda3/lib/python3.13/site-packages/xontrib/conda.xsh
+no change     /home/bsood/miniconda3/etc/profile.d/conda.csh
+no change     /home/bsood/.bashrc
+No action taken.
+Starting ChartQA Evaluation
+Using Projector Weights: /home/bsood/Multimodal-Machine-Learning-Project/outputs/chartqa_finetune_v1/checkpoint-2655/projector.pt
+Sat Mar 28 19:39:21 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 575.51.03              Driver Version: 575.51.03      CUDA Version: 12.9     |
+|-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA L40S                    On  |   00000000:61:00.0 Off |                    0 |
+| N/A   30C    P0             63W /  350W |       0MiB /  46068MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+                                                                                         
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+Loading checkpoint from: /home/bsood/Multimodal-Machine-Learning-Project/outputs/chartqa_finetune_v1/checkpoint-2655/projector.pt
+Loading ChartQA dataset...
+DatasetDict({
+    train: Dataset({
+        features: ['image', 'query', 'label', 'human_or_machine', 'prompt', 'completion'],
+        num_rows: 28299
+    })
+    eval: Dataset({
+        features: ['image', 'query', 'label', 'human_or_machine', 'prompt', 'completion'],
+        num_rows: 1920
+    })
+    test: Dataset({
+        features: ['image', 'query', 'label', 'human_or_machine', 'prompt', 'completion'],
+        num_rows: 2500
+    })
+})
+{'image': <PIL.PngImagePlugin.PngImageFile image mode=RGB size=422x359 at 0x14FDB82E9570>, 'query': 'Is the value of Favorable 38 in 2015?', 'label': ['Yes'], 'human_or_machine': 0, 'prompt': '<image>\nYou are a chart question-answering assistant. Respond with the final answer only, no explanations.\nQuestion: Is the value of Favorable 38 in 2015?\nAnswer:', 'completion': 'Yes'}
+Loading Vision: google/siglip2-so400m-patch16-512
+Loading LLM: Qwen/Qwen3-4B-Instruct-2507
+
+==================================================
+Evaluating Generative Relaxed Accuracy on Test Set...
+
+Final Test Set Relaxed Accuracy: 48.96% (1224/2500)
+==================================================
+
+Job finished.
