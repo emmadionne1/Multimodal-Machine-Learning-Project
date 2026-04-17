@@ -33,8 +33,6 @@ import torch
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 SEED = 8
-MAX_LEN = 2048
-MAX_NEW_TOKENS=64
 bleu = evaluate.load("bleu")
 rouge = evaluate.load("rouge")
 
@@ -573,6 +571,8 @@ if __name__ == "__main__":
     parser.add_argument("--gradient_accumulation_steps", type=int, default=4)
     parser.add_argument("--task", choices=['pretrain', 'chartqa', 'summarization', 'table'])
     parser.add_argument("--trained_weights", type=str, default=None)
+    parser.add_argument("--truncation_length", type=int, default=2048)
+    parser.add_argument("--max_new_tokens", type=int, default=64)
     args = parser.parse_args()
 
     EXPERIMENT_NAME = args.experiment_name
@@ -587,6 +587,8 @@ if __name__ == "__main__":
     GRADIENT_ACCUMULATION_STEPS = args.gradient_accumulation_steps
     TASK = args.task
     TRAINED_WEIGHTS = args.trained_weights
+    MAX_LEN = args.truncation_length
+    MAX_NEW_TOKENS = args.max_new_tokens
 
     # initialize wandb
     wandb.login(key=config.WANDB_KEY)
@@ -621,7 +623,7 @@ if __name__ == "__main__":
     training_args = TrainingArguments(
         output_dir=OUTPUT_DIR,
         per_device_train_batch_size=PER_DEVICE_TRAIN_BATCH_SIZE,
-        per_device_eval_batch_size=12,
+        per_device_eval_batch_size=PER_DEVICE_TRAIN_BATCH_SIZE,
         gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,
         learning_rate=LR,
         num_train_epochs=EPOCHS,

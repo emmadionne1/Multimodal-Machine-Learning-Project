@@ -98,9 +98,22 @@ case "$SLURM_ARRAY_TASK_ID" in
     ;;
   # CHART TO TABLE
   15)
+    # sbatch --array=15 --constrain=A100_80GB --time=2:00:00 base_architecture.sh
     LOG_NAME="table_1e4"
-    CMD=(python3 base_architecture.py --experiment_name table_1e4 --lr 1e-4 --epochs 4 --task table 
-          --trained_weights outputs/7e3_a80_mediumishish_batch.pt --per_device_train_batch_size 8 --gradient_accumulation_steps 2)
+    CMD=(python3 base_architecture.py --experiment_name table_1e4 --lr 1e-4 --epochs 3 --task table --max_new_tokens 1000
+          --trained_weights outputs/summarization_7e3.pt --per_device_train_batch_size 4 --gradient_accumulation_steps 4)
+    ;;
+  18)
+    # sbatch --array=18 --constrain=A100_80GB --time=2:00:00 base_architecture.sh
+    LOG_NAME="table_1e3"
+    CMD=(python3 base_architecture.py --experiment_name table_1e3 --lr 1e-3 --epochs 3 --task table --max_new_tokens 1000
+          --trained_weights outputs/summarization_7e3.pt --per_device_train_batch_size 4 --gradient_accumulation_steps 4)
+    ;;
+  19)
+    # sbatch --array=20 --constrain=A100_80GB --time=2:00:00 base_architecture.sh
+    LOG_NAME="table_7e3"
+    CMD=(python3 base_architecture.py --experiment_name table_7e3 --lr 7e-3 --epochs 3 --task table --max_new_tokens 1000
+          --trained_weights outputs/summarization_7e3.pt --per_device_train_batch_size 4 --gradient_accumulation_steps 4)
     ;;
   *)
     echo "Invalid SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
