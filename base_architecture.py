@@ -6,9 +6,11 @@ from pathlib import Path
 import zipfile
 import evaluate
 import wandb
+import re
 import os
 import config
 import numpy as np
+from collections import Counter
 import argparse
 from pprint import pprint
 from datasets import load_dataset, DatasetDict
@@ -26,11 +28,15 @@ from transformers import (
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR, get_last_checkpoint
 from transformers.trainer_callback import TrainerState
 from baselines.multimodal_prompting_baselines import is_answer_correct_relaxed
+from sklearn.metrics import f1_score
 import torch
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 SEED = 8
+MAX_LEN = 2048
+MAX_NEW_TOKENS=64
 bleu = evaluate.load("bleu")
+rouge = evaluate.load("rouge")
 
 def convert_chartqa_example(ex):
     answer = ex["label"][0]
@@ -42,33 +48,89 @@ def convert_chartqa_example(ex):
     )
     return {"image": ex["image"], "prompt": prompt, "completion": str(answer).strip()}
 
-def create_dataset(overfit_check=False, dataset_num_splits=5, dataset_split_index=-1, pretraining=True):
-    if not pretraining:
-        raw = load_dataset("HuggingFaceM4/ChartQA")
+def convert_summarization_example(ex):
+    question, answer = ex["texts"][0]["user"], ex["texts"][0]["assistant"]
+    prompt = (
+        "<image>\n"
+        "You are a chart question-answering assistant. Respond to the question with the final answer only, no explanations, and in detail.\n"
+        f"Question: {question.strip()}\n"
+        "Answer:"
+    )
+    return {"image": ex["images"][0], "prompt": prompt, "completion": str(answer).strip()}
 
-        eval_split = "val" if "val" in raw else "validation" if "validation" in raw else "test"
-        test_split = "test" if "test" in raw else eval_split
+def convert_table_example(ex):
+    answer = ex["text"]
+    prompt = (
+        "<image>\n"
+        "You are a chart assistant. Extract all the information from the table and convert it into a Markdown table. Output only the table, nothing else.\n"
+        "Answer:"
+    )
+    return {"image": ex["image"], "prompt": prompt, "completion": str(answer).strip()}
 
-        if overfit_check:
-            train_raw = raw["train"].select(range(3))
-            eval_raw = train_raw
-            test_raw = train_raw
-        else:
-            train_raw = raw["train"]
-            eval_raw = raw[eval_split]
-            test_raw = raw[test_split]
+def create_chartqa_dataset(overfit_check=False):
+    raw = load_dataset("HuggingFaceM4/ChartQA")
 
-        ds = DatasetDict({
-            "train": train_raw.map(convert_chartqa_example),
-            "eval": eval_raw.map(convert_chartqa_example),
-            "test": test_raw.map(convert_chartqa_example),
-        })
+    eval_split = "val" if "val" in raw else "validation" if "validation" in raw else "test"
+    test_split = "test" if "test" in raw else eval_split
 
-        print(ds)
-        print(ds["train"][0])
+    if overfit_check:
+        train_raw = raw["train"].select(range(3))
+        eval_raw = train_raw
+        test_raw = train_raw
+    else:
+        train_raw = raw["train"]
+        eval_raw = raw[eval_split]
+        test_raw = raw[test_split]
 
-        return ds, None
-    
+    ds = DatasetDict({
+        "train": train_raw.map(convert_chartqa_example),
+        "eval": eval_raw.map(convert_chartqa_example),
+        "test": test_raw.map(convert_chartqa_example),
+    })
+
+    print(ds)
+    print(ds["train"][0])
+
+    return ds, None
+
+def create_summarization_dataset(overfit_check=False):
+    raw = load_dataset("HuggingFaceM4/the_cauldron", "chart2text")["train"]
+    split_1 = raw.train_test_split(test_size=0.20, seed=SEED, shuffle=True)
+    split_2 = split_1["test"].train_test_split(test_size=0.50, seed=SEED, shuffle=True)
+    ds = DatasetDict({"train": split_1["train"], "eval": split_2["train"], "test": split_2["test"]})
+
+    if overfit_check:
+        ds["train"] = ds["train"].select(range(3))
+        ds["eval"] = ds["train"]
+        ds["test"] = ds["train"]
+
+    ds = ds.map(convert_summarization_example)
+    ds = ds.remove_columns("images")
+
+    print(ds)
+    print(ds["train"][0])
+
+    return ds, None
+
+def create_table_dataset(overfit_check=False):
+    raw = load_dataset("chiragtubakad/chart-to-table")["train"]
+    split_1 = raw.train_test_split(test_size=0.10, seed=SEED, shuffle=True)
+    split_2 = split_1["test"].train_test_split(test_size=0.50, seed=SEED, shuffle=True)
+    ds = DatasetDict({"train": split_1["train"], "eval": split_2["train"], "test": split_2["test"]})
+
+    if overfit_check:
+        ds["train"] = ds["train"].select(range(3))
+        ds["eval"] = ds["train"]
+        ds["test"] = ds["train"]
+
+    ds = ds.map(convert_table_example)
+
+    print(ds)
+    print(ds["train"][0])
+
+    return ds, None
+
+def create_pretrain_dataset(overfit_check=False):
     # step 1: download the snapshots directly rather than let HF do it
     # also only download some of the files because there was this weird column mismatch thing happening
     snapshot_dir = Path(snapshot_download(
@@ -92,8 +154,6 @@ def create_dataset(overfit_check=False, dataset_num_splits=5, dataset_split_inde
         pprint(v)
     img = Image.open((snapshot_dir / "images") / ds[0]["image"]).convert("RGB")
     print(f"Image size: {img.size}")
-    # plt.imshow(img)
-    # plt.savefig("sample_image.png")
 
     # step 4: change up the format to a prompt-completion dataset 
     ds = ds.map(lambda ex: {
@@ -109,17 +169,7 @@ def create_dataset(overfit_check=False, dataset_num_splits=5, dataset_split_inde
     ds = DatasetDict({"train": split_1["train"], "eval": split_2["train"], "test": split_2["test"]})
     print(ds)
 
-    # step 6a: split up into chunks if requested
-    if dataset_split_index >= 0 and dataset_split_index < dataset_num_splits:
-        train_len = len(ds["train"])
-        chunk_size = (train_len + dataset_num_splits - 1) // dataset_num_splits
-        start = dataset_split_index * chunk_size
-        end = min(start + chunk_size, train_len)
-        print(f"Selecting train chunk {dataset_split_index + 1}/{dataset_num_splits}")
-        ds["train"] = ds["train"].select(range(start, end))
-        print(ds)
-
-    # step 6b: for debugging only
+    # step 6: for debugging only
     if overfit_check:
         ds["train"] = ds["train"].select(range(3))
         ds["eval"] = ds["train"]
@@ -128,7 +178,19 @@ def create_dataset(overfit_check=False, dataset_num_splits=5, dataset_split_inde
 
     return ds, image_root
 
-# TODO: i had to make this diff than the notebook code - had to load the vision model block specifically
+def create_dataset(task, overfit_check=False):
+    if task == "chartqa":
+        return create_chartqa_dataset(overfit_check=overfit_check)
+    elif task == "pretrain":
+        return create_pretrain_dataset(overfit_check=overfit_check)
+    elif task == "summarization":
+        return create_summarization_dataset(overfit_check=overfit_check)
+    elif task == "table":
+        return create_table_dataset(overfit_check=overfit_check)
+    else:
+        print("huh")
+        return None, None
+
 def load_vision_model(vision_model_name):
     print(f"Loading Vision: {vision_model_name}")
     processor = AutoProcessor.from_pretrained(vision_model_name, use_fast=True)
@@ -136,7 +198,6 @@ def load_vision_model(vision_model_name):
     vision_model.eval()
     return vision_model.vision_model, processor
 
-# TODO: needed to remove auto to work with multi-GPU stuff
 def load_language_model(language_model_name):
     print(f"Loading LLM: {language_model_name}")
     tokenizer = AutoTokenizer.from_pretrained(language_model_name, trust_remote_code=True)
@@ -236,7 +297,6 @@ class CustomVLM(torch.nn.Module):
             p.requires_grad = True
 
     def forward(self, input_ids=None, attention_mask=None, labels=None, pixel_values=None, **kwargs):
-        # TODO: needed to change the float type from f32 to bf16
         with torch.no_grad():
             vision_outputs = self.vision_model(pixel_values=pixel_values).last_hidden_state.to(self.projector.norm.weight.dtype)
         image_features = self.projector(vision_outputs)
@@ -251,15 +311,15 @@ class CustomVLM(torch.nn.Module):
 
             # imp: we dont truncate because we dont want to truncate the image accidentally
             merged_embeds = torch.cat([inputs_embeds[i, :img_idx, :], image_features[i], inputs_embeds[i, img_idx + 1 :, :]], dim=0)
-            final_embeds.append(merged_embeds)
+            final_embeds.append(merged_embeds[:MAX_LEN])
 
             image_labels = torch.full((image_features.size(1),), -100, dtype=labels.dtype, device=labels.device)
             merged_labels = torch.cat([labels[i, :img_idx], image_labels, labels[i, img_idx + 1 :]], dim=0)
-            final_labels.append(merged_labels)
+            final_labels.append(merged_labels[:MAX_LEN])
 
             image_mask = torch.ones(image_features.size(1), dtype=attention_mask.dtype, device=attention_mask.device)
             merged_mask = torch.cat([attention_mask[i, :img_idx], image_mask, attention_mask[i, img_idx + 1 :]], dim=0)
-            final_masks.append(merged_mask)
+            final_masks.append(merged_mask[:MAX_LEN])
 
         outputs = self.language_model(
             inputs_embeds=torch.stack(final_embeds, dim=0),
@@ -299,14 +359,14 @@ class CustomVLM(torch.nn.Module):
         return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
     
 class GenEvalCallback(TrainerCallback):
-    def __init__(self, trainer, eval_ds, image_root, tokenizer, processor, overfit, pretrain):
+    def __init__(self, trainer, eval_ds, image_root, tokenizer, processor, overfit, task):
         self.trainer = trainer
         self.eval_ds = eval_ds
         self.image_root = image_root
         self.tokenizer = tokenizer
         self.processor = processor
         self.overfit = overfit
-        self.pretrain = pretrain
+        self.task = task
 
     def on_evaluate(self, args, state, control, metrics=None, **kwargs):
         if metrics is None:
@@ -319,14 +379,14 @@ class GenEvalCallback(TrainerCallback):
                 self.image_root,
                 self.tokenizer,
                 self.processor,
-                self.pretrain
+                self.task
             )
             metrics.update(gen_metrics)
             self.trainer.log(gen_metrics)
 
         return control
         
-def run_generation_eval(model, ds, image_root, tokenizer, processor, pretrain):
+def run_generation_eval(model, ds, image_root, tokenizer, processor, task):
     model.eval()
     preds, golds = [], []
 
@@ -345,7 +405,7 @@ def run_generation_eval(model, ds, image_root, tokenizer, processor, pretrain):
             ).pixel_values.to(DEVICE)
 
             # run generation
-            gen_text = model.generate_text(prompt_ids, attention_mask, pixel_values, max_new_tokens=64)
+            gen_text = model.generate_text(prompt_ids, attention_mask, pixel_values, max_new_tokens=MAX_NEW_TOKENS)
             preds.append(gen_text)
             golds.append(ex["completion"])
 
@@ -354,10 +414,35 @@ def run_generation_eval(model, ds, image_root, tokenizer, processor, pretrain):
             print("TARGET:\n", golds[-1])
 
     # compute metrics
-    if not pretrain:
+    metrics = compute_metrics(preds, golds, task)
+    print(metrics)
+    return(metrics)
+
+def table_cell_f1(pred, gold):
+    pred_cells = [c.strip().lower() for c in re.split(r"[\n,\|]+", pred) if c.strip()]
+    gold_cells = [c.strip().lower() for c in re.split(r"[\n,\|]+", gold) if c.strip()]
+
+    pred_counter, gold_counter = Counter(pred_cells), Counter(gold_cells)
+    overlap = sum((pred_counter & gold_counter).values())
+
+    if len(pred_cells) == 0 and len(gold_cells) == 0:
+        return 1.0
+    elif len(pred_cells) == 0 or len(gold_cells) == 0:
+        return 0.0
+
+    precision = overlap / len(pred_cells)
+    recall = overlap / len(gold_cells)
+
+    if precision + recall == 0:
+        return 0.0
+    else:
+        return 2 * precision * recall / (precision + recall)
+
+def compute_metrics(preds, golds, task):
+    if task == "chartqa":
         relaxed_scores = [is_answer_correct_relaxed(pred, gold) for pred, gold in zip(preds, golds)]
         metrics = {"eval_relaxed_accuracy": float(np.mean(relaxed_scores))}
-    else:
+    elif task == "pretrain":
         bleu_scores = []
         for pred, gold in zip(preds, golds):
             if len(pred.strip()) == 0:
@@ -365,8 +450,24 @@ def run_generation_eval(model, ds, image_root, tokenizer, processor, pretrain):
             else:
                 bleu_scores.append(bleu.compute(predictions=[pred], references=[gold])["bleu"])
         metrics = {"eval_bleu": float(np.mean(bleu_scores))}
-    print(metrics)
-    return(metrics)
+    elif task == "summarization":
+        bleu_scores, rouge_scores = [], []
+        for pred, gold in zip(preds, golds):
+            if len(pred.strip()) == 0:
+                bleu_scores.append(0.0)
+                rouge_scores.append(0.0)
+            else:
+                bleu_scores.append(bleu.compute(predictions=[pred], references=[gold])["bleu"])
+                rouge_scores.append(rouge.compute(predictions=[pred], references=[gold])["rougeL"])
+        metrics = {"eval_bleu": float(np.mean(bleu_scores)), "eval_rouge": float(np.mean(rouge_scores))}
+    elif task == "table":
+        f1_list = [table_cell_f1(pred, gold) for pred, gold in zip(preds, golds)]
+        rms_f1 = np.sqrt(np.mean(np.square(f1_list)))
+        metrics = {"eval_rms_f1": float(rms_f1)}
+    else:
+        print("huh")
+
+    return metrics
 
 class ProjectorOnlyTrainer(Trainer):
     """
@@ -467,10 +568,11 @@ if __name__ == "__main__":
     parser.add_argument("--spatial_merge_size", type=int, default=2)
     parser.add_argument("--overfit_check", action="store_true")
     parser.add_argument("--epochs", type=int, default=2)
-    parser.add_argument("--dataset_num_splits", type=int, default=5)
-    parser.add_argument("--dataset_split_index", type=int, default=-1)
     parser.add_argument("--lr", type=float, default=5e-3)
-    parser.add_argument("--pretrain", action="store_true")
+    parser.add_argument("--per_device_train_batch_size", type=int, default=16)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=4)
+    parser.add_argument("--task", choices=['pretrain', 'chartqa', 'summarization', 'table'])
+    parser.add_argument("--trained_weights", type=str, default=None)
     args = parser.parse_args()
 
     EXPERIMENT_NAME = args.experiment_name
@@ -480,22 +582,18 @@ if __name__ == "__main__":
     SPATIAL_MERGE_SIZE = args.spatial_merge_size
     VISION_MODEL_NAME = args.vision_model_name
     LANGUAGE_MODEL_NAME = args.language_model_name
-    DATASET_NUM_SPLITS = args.dataset_num_splits
-    DATASET_SPLIT_INDEX = args.dataset_split_index
     OUTPUT_DIR = f"./outputs/{EXPERIMENT_NAME}"
-    PRETRAIN = True if args.pretrain else False
+    PER_DEVICE_TRAIN_BATCH_SIZE = args.per_device_train_batch_size
+    GRADIENT_ACCUMULATION_STEPS = args.gradient_accumulation_steps
+    TASK = args.task
+    TRAINED_WEIGHTS = args.trained_weights
 
     # initialize wandb
     wandb.login(key=config.WANDB_KEY)
     run = wandb.init(project=f"base_architecture", name=EXPERIMENT_NAME)
 
     # load dataset and dir where raw images are stored
-    ds, image_root = create_dataset(
-        overfit_check=OVERFIT_CHECK, 
-        dataset_num_splits = DATASET_NUM_SPLITS, 
-        dataset_split_index = DATASET_SPLIT_INDEX,
-        pretraining=PRETRAIN
-    )
+    ds, image_root = create_dataset(TASK, overfit_check=OVERFIT_CHECK)
 
     # load vision model
     vision_model, processor = load_vision_model(VISION_MODEL_NAME)
@@ -512,6 +610,8 @@ if __name__ == "__main__":
 
     # load custom proj layer
     proj_layer = Qwen3VLProjector(vision_dim, llm_dim, SPATIAL_MERGE_SIZE).to(DEVICE, dtype=torch.bfloat16)
+    if TRAINED_WEIGHTS is not None:
+        proj_layer.load_state_dict(torch.load(TRAINED_WEIGHTS, map_location=DEVICE))
 
     # load whole model now
     model = CustomVLM(vision_model, processor, language_model, tokenizer, proj_layer, image_token_id)
@@ -520,9 +620,9 @@ if __name__ == "__main__":
 
     training_args = TrainingArguments(
         output_dir=OUTPUT_DIR,
-        per_device_train_batch_size=12,
+        per_device_train_batch_size=PER_DEVICE_TRAIN_BATCH_SIZE,
         per_device_eval_batch_size=12,
-        gradient_accumulation_steps=4,
+        gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,
         learning_rate=LR,
         num_train_epochs=EPOCHS,
         run_name=EXPERIMENT_NAME,
@@ -535,9 +635,9 @@ if __name__ == "__main__":
         save_total_limit=2,
         eval_strategy="epoch",
         logging_strategy="steps",
-        logging_steps=5,
+        logging_steps=100,
         save_strategy="steps",
-        save_steps=50
+        save_steps=100
     )
 
     trainer = ProjectorOnlyTrainer(
@@ -547,10 +647,8 @@ if __name__ == "__main__":
         eval_dataset=ds["eval"],
         data_collator=collator,
     )
-    trainer.add_callback(GenEvalCallback(trainer, ds["eval"], image_root, tokenizer, processor, OVERFIT_CHECK, PRETRAIN))
+    trainer.add_callback(GenEvalCallback(trainer, ds["eval"], image_root, tokenizer, processor, OVERFIT_CHECK, TASK))
 
-    # not resuming from checkpoint, as we're only saving the proj layer weights
-    # we cant simply just load those, we'd need to save the scheduler, optim states too and im lazy
     print("beginning training!")
     last_checkpoint = get_last_checkpoint(OUTPUT_DIR) if os.path.isdir(OUTPUT_DIR) else None
     if last_checkpoint is not None:
@@ -562,7 +660,7 @@ if __name__ == "__main__":
     print("finished training!")
 
     # do final eval on best model just to double check
-    run_generation_eval(model, ds["eval"], image_root, tokenizer, processor, PRETRAIN)
+    run_generation_eval(model, ds["eval"], image_root, tokenizer, processor, TASK)
 
     run.finish()
     print("done!")

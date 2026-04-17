@@ -1,56 +1,106 @@
 #!/bin/bash
 #SBATCH --job-name=base_architecture
 #SBATCH --partition=general
-#SBATCH --array=1-2
+#SBATCH --array=1-14
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
 #SBATCH --export=ALL
-#SBATCH --cpus-per-task=2
-#SBATCH --time=10:00:00
-#SBATCH --mem=48G
+#SBATCH --cpus-per-task=6
+#SBATCH --time=12:00:00
+#SBATCH --mem=80G
 #SBATCH --gpus=1
 #SBATCH --ntasks=1
+#SBATCH --constrain=A100_40GB|L40S
 
 case "$SLURM_ARRAY_TASK_ID" in
+  # OVERFIT CHECKS
   1)
     LOG_NAME="overfit_check"
-    CMD=(python3 base_architecture.py --experiment_name overfit_check --overfit_check --epochs 100 --lr 5e-5 --pretrain)
+    CMD=(python3 base_architecture.py --experiment_name overfit_check --overfit_check --epochs 100 --lr 5e-5 --task pretrain)
     ;;
   2)
-    LOG_NAME="v_large_lr"
-    CMD=(python3 base_architecture.py --experiment_name v_large_lr_1_gpu --lr 1e-4 --epochs 1 --pretrain)
+    LOG_NAME="overfit_check_chartqa"
+    CMD=(python3 base_architecture.py --experiment_name overfit_check_chartqa --overfit_check --epochs 100 --lr 5e-5 --task chartqa)
     ;;
+  # CHARTQA RUN
   3)
-    LOG_NAME="v_large_lr_backup"
-    CMD=(python3 base_architecture.py --experiment_name v_large_lr_backup --pretrain)
+    LOG_NAME="chartqa_direct"
+    CMD=(python3 base_architecture.py --experiment_name chartqa_direct --epochs 5 --lr 5e-4 --task chartqa)
     ;;
-  4)
-    LOG_NAME="v_large_lr_backup_tiny"
-    CMD=(python3 base_architecture.py --experiment_name v_large_lr_backup_tiny --dataset_split_index 0 --pretrain)
+  # BATCH SIZE 12 RUNS ACROSS LRS
+  4) 
+    LOG_NAME="7e3_a40"
+    CMD=(python3 base_architecture.py --experiment_name 7e3_a40 --lr 7e-3 --epochs 2 --task pretrain --per_device_train_batch_size 12)
     ;;
   5) 
     LOG_NAME="1e4_a40"
-    # sbatch --array=5 --gpus=1 --constrain=A100_40GB --mem=80G --cpus-per-task=6 --time=12:00:00 --partition array base_architecture.sh
-    CMD=(python3 base_architecture.py --experiment_name 1e4_a40 --lr 1e-4 --epochs 2 --pretrain)
+    CMD=(python3 base_architecture.py --experiment_name 1e4_a40 --lr 1e-4 --epochs 2 --task pretrain --per_device_train_batch_size 12)
     ;;
   6) 
-    LOG_NAME="1e5_a40"
-    # sbatch --array=6 --gpus=1 --constrain=A100_40GB --mem=80G --cpus-per-task=6 --time=6:00:00 --partition array base_architecture.sh
-    CMD=(python3 base_architecture.py --experiment_name 1e5_a40 --lr 1e-5 --epochs 2 --pretrain)
+    LOG_NAME="1e3_a40"
+    CMD=(python3 base_architecture.py --experiment_name 1e3_a40 --lr 1e-3 --epochs 2 --task pretrain --per_device_train_batch_size 12)
     ;;
   7) 
     LOG_NAME="3e4_a40"
-    # sbatch --array=7 --gpus=1 --constrain=A100_40GB --mem=80G --cpus-per-task=6 --time=6:00:00 --partition array base_architecture.sh
-    CMD=(python3 base_architecture.py --experiment_name 3e4_a40 --lr 3e-4 --epochs 2 --pretrain)
+    CMD=(python3 base_architecture.py --experiment_name 3e4_a40 --lr 3e-4 --epochs 2 --task pretrain --per_device_train_batch_size 12)
+    ;;
+  # BATCH SIZE 16 RUNS ACROSS LRS
+  10) 
+    LOG_NAME="1e3_a80"
+    # sbatch --array=10 --constrain=A100_80GB base_architecture.sh
+    CMD=(python3 base_architecture.py --experiment_name 1e3_a80 --lr 1e-3 --epochs 2 --task pretrain)
+    ;;
+  11) 
+    LOG_NAME="7e3_a80"
+    # sbatch --array=11 --constrain=A100_80GB base_architecture.sh
+    CMD=(python3 base_architecture.py --experiment_name 7e3_a80 --lr 7e-3 --epochs 2 --task pretrain)
+    ;;
+  # BATCH SIZE 24 RUNS
+  13)
+    LOG_NAME="1e3_a80_mediumishish_batch"
+    # sbatch --array=13 --constrain=A100_80GB base_architecture.sh
+    CMD=(python3 base_architecture.py --experiment_name 1e3_a80_mediumishish_batch --lr 1e-3 --epochs 2 --task pretrain --per_device_train_batch_size 24)
+    ;;
+  14)
+    LOG_NAME="1e3_a80_medium_batch"
+    # sbatch --array=14 --gpus=2 --constrain=A100_80GB base_architecture.sh
+    CMD=(python3 base_architecture.py --experiment_name 1e3_a80_medium_batch --lr 1e-3 --epochs 2 --task pretrain --per_device_train_batch_size 24 --gradient_accumulation_steps 8)
     ;;
   8)
-    LOG_NAME="overfit_check_chartqa"
-    CMD=(python3 base_architecture.py --experiment_name overfit_check_chartqa --overfit_check --epochs 100 --lr 5e-5)
+    LOG_NAME="7e3_a80_mediumishish_batch"
+    # sbatch --array=8 --constrain=A100_80GB base_architecture.sh
+    CMD=(python3 base_architecture.py --experiment_name 7e3_a80_mediumishish_batch --lr 7e-3 --epochs 2 --task pretrainn --per_device_train_batch_size 24)
+    ;;
+  # CHART SUMMARIZATION
+  12)
+    # sbatch --array=12 --constrain=A100_80GB base_architecture.sh
+    LOG_NAME="summarization_1e5"
+    CMD=(python3 base_architecture.py --experiment_name summarization_1e5 --lr 1e-5 --task summarization 
+          --trained_weights outputs/7e3_a80_mediumishish_batch.pt --per_device_train_batch_size 8 --gradient_accumulation_steps 2)
     ;;
   9)
-    LOG_NAME="chartqa_direct"
-    # sbatch --array=9 --gpus=2 --constrain=A100_40GB --mem=80G --cpus-per-task=6 --time=6:00:00 --partition array base_architecture.sh
-    CMD=(python3 base_architecture.py --experiment_name chartqa_direct --epochs 5 --lr 5e-4)
+    # sbatch --array=9 --constrain=A100_80GB base_architecture.sh
+    LOG_NAME="summarization_1e4"
+    CMD=(python3 base_architecture.py --experiment_name summarization_1e4 --lr 1e-4 --task summarization 
+          --trained_weights outputs/7e3_a80_mediumishish_batch.pt --per_device_train_batch_size 8 --gradient_accumulation_steps 2)
+    ;;
+  16)
+    # sbatch --array=16 --constrain=A100_80GB base_architecture.sh
+    LOG_NAME="summarization_1e3"
+    CMD=(python3 base_architecture.py --experiment_name summarization_1e3 --lr 1e-3 --task summarization 
+          --trained_weights outputs/7e3_a80_mediumishish_batch.pt --per_device_train_batch_size 8 --gradient_accumulation_steps 2)
+    ;;
+  17)
+    # sbatch --array=17 --constrain=A100_80GB base_architecture.sh
+    LOG_NAME="summarization_7e3"
+    CMD=(python3 base_architecture.py --experiment_name summarization_7e3 --lr 7e-3 --task summarization 
+          --trained_weights outputs/7e3_a80_mediumishish_batch.pt --per_device_train_batch_size 8 --gradient_accumulation_steps 2)
+    ;;
+  # CHART TO TABLE
+  15)
+    LOG_NAME="table_1e4"
+    CMD=(python3 base_architecture.py --experiment_name table_1e4 --lr 1e-4 --epochs 4 --task table 
+          --trained_weights outputs/7e3_a80_mediumishish_batch.pt --per_device_train_batch_size 8 --gradient_accumulation_steps 2)
     ;;
   *)
     echo "Invalid SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
@@ -58,8 +108,8 @@ case "$SLURM_ARRAY_TASK_ID" in
     ;;
 esac
 
-OUT_FILE="slurm/${LOG_NAME}4.out"
-ERR_FILE="slurm/${LOG_NAME}4.err"
+OUT_FILE="slurm/${LOG_NAME}.out"
+ERR_FILE="slurm/${LOG_NAME}.err"
 
 mkdir -p slurm
 
@@ -72,7 +122,7 @@ exec >"$OUT_FILE" 2>"$ERR_FILE"
 
 source "$HOME/.bashrc"
 conda init
-conda activate bsampling
+conda activate mmml
 cd "$HOME/Multimodal-Machine-Learning-Project"
 
 echo "SLURM_ARRAY_TASK_ID=$SLURM_ARRAY_TASK_ID"
@@ -82,7 +132,7 @@ nvidia-smi --query-gpu=pci.bus_id
 nvidia-smi -q -d PAGE_RETIREMENT
 nvidia-smi
 
-export HF_HOME="/data/user_data/bsood/.hf_cache"
+export HF_HOME="/data/user_data/$USER/.hf_cache"
 export HF_HUB_CACHE="/data/hf_cache/hub"
 export HF_DATASETS_CACHE="/data/hf_cache/datasets"
 
