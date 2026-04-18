@@ -1,7 +1,10 @@
+import os
+# --- MEMORY FIX 1: Prevent fragmentation ---
+os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
+
 import argparse
 import torch
 import wandb
-import os
 import gc
 import numpy as np
 import easyocr
@@ -23,7 +26,6 @@ def evaluate_test_set(model, test_ds, tokenizer, processor, prefix="Pre-Train"):
     print(f"\n{'='*50}")
     print(f"[{prefix}] Evaluating Generative Relaxed Accuracy on Test Set...")
     
-    # --- PRINT A SAMPLE EVALUATION PROMPT ---
     if len(test_ds) > 0:
         sample_msg = [{"role": "user", "content": test_ds[0]["prompt"]}]
         sample_prompt = tokenizer.apply_chat_template(sample_msg, tokenize=False, add_generation_prompt=True)
@@ -62,11 +64,8 @@ def evaluate_test_set(model, test_ds, tokenizer, processor, prefix="Pre-Train"):
         if is_answer_correct_relaxed(prediction, ground_truth):
             correct += 1
             
-        # --- MEMORY OPTIMIZATION ---
-        # Explicitly delete tensors to prevent memory accumulation in the loop
         del pixel_values, inputs, attention_mask, prediction_text
     
-    # Flush cache at the end of evaluation
     torch.cuda.empty_cache()
             
     accuracy = (correct / total) * 100
@@ -86,22 +85,16 @@ def main():
     parser.add_argument("--lr", type=float, default=5e-5)
     args = parser.parse_args()
 
-    # 1. Initialize wandb
     wandb.login(key=config.WANDB_KEY)
     run = wandb.init(project="vlm_finetuning", name=args.experiment_name)
 
-    # 2. Load Raw ChartQA Dataset
     print("Loading raw HuggingFace ChartQA dataset...")
     raw_ds = load_dataset("HuggingFaceM4/ChartQA")
 
-    # =========================================================================
-    # PHASE 1: OCR EXTRACTION (Only EasyOCR on GPU)
-    # =========================================================================
     print("Initializing EasyOCR on GPU...")
     reader = easyocr.Reader(['en'], gpu=torch.cuda.is_available())
 
     def apply_ocr_prompt(example):
-        """Dataset map function to extract OCR and format the prompt."""
         image = example["image"]
         query = example["query"]
         
@@ -109,12 +102,26 @@ def main():
             image = image.convert("RGB")
         img_np = np.array(image)
         
-        # Extract and sort text
         results = reader.readtext(img_np)
         results = sorted(results, key=lambda x: x[0][0][1])
-        ocr_text = "\n".join([res[1] for res in results])
         
-        # Build prompt format requested by user
+        # --- MEMORY FIX 2: Truncate massive OCR blobs to max 1000 words ---
+        lines = []
+        word_count = 0
+        for res in results:
+            text = res[1]
+            words_in_text = text.split()
+            if word_count + len(words_in_text) <= 1000:
+                lines.append(text)
+                word_count += len(words_in_text)
+            else:
+                remaining_words = 1000 - word_count
+                if remaining_words > 0:
+                    lines.append(" ".join(words_in_text[:remaining_words]))
+                break
+                
+        ocr_text = "\n".join(lines)
+        
         prompt = (
             f"<image>\n"
             f"You are given the image and it's text extracted from a chart via OCR:\n{ocr_text}\n"
@@ -125,22 +132,16 @@ def main():
         label = example["label"][0] if isinstance(example["label"], list) else example["label"]
         return {"prompt": prompt, "completion": label}
 
-    # Precompute EVERYTHING right away
     print("\n--- STEP 1: Precomputing OCR for ALL Sets ---")
     test_ds = raw_ds["test"].map(apply_ocr_prompt, desc="Extracting OCR for Test Split")
     train_ds = raw_ds["train"].map(apply_ocr_prompt, desc="Extracting OCR for Train Split")
     val_ds = raw_ds["val"].map(apply_ocr_prompt, desc="Extracting OCR for Val Split")
 
-    # --- CRITICAL MEMORY OPTIMIZATION ---
     print("\nCleaning up EasyOCR to free VRAM before loading VLM...")
     del reader
     gc.collect()
     torch.cuda.empty_cache()
-    # =========================================================================
 
-    # =========================================================================
-    # PHASE 2: VLM TRAINING & EVALUATION (Only VLM on GPU)
-    # =========================================================================
     print("\n--- STEP 2: Loading VLM Models ---")
     vision_model, processor = load_vision_model(args.vision_model_name)
     v_conf = vision_model.config.vision_config if hasattr(vision_model.config, "vision_config") else vision_model.config
@@ -163,40 +164,20 @@ def main():
     model.freeze_backbones()
     model.to(DEVICE)
 
-    # Pre-Training Evaluation
     print("\n--- STEP 3: Pre-Training Evaluation ---")
     evaluate_test_set(model, test_ds, tokenizer, processor, prefix="Pre-Train")
 
-    # Set Up Training
     print("\n--- STEP 4: Training for 1 Epoch ---")
     collator = CustomVLMCollator(tokenizer, processor, image_root=None) 
 
-    # --- SHOWCASE EXACT TRAINING BATCH (BATCH SIZE 2) ---
-    print("\n" + "="*50)
-    print("SHOWCASING EXACT TRAINING BATCH (BATCH SIZE 2):")
-    sample_batch = [train_ds[0], train_ds[1]]
-    collated_batch = collator(sample_batch)
-    
-    for i in range(2):
-        print(f"\n--- Batch Item {i+1} ---")
-        # Decode inputs
-        decoded_input = tokenizer.decode(collated_batch["input_ids"][i])
-        print("DECODED INPUT_IDS (What the model sees):")
-        print(repr(decoded_input))
-        
-        # Decode labels (ignoring -100 which is masked out of the loss)
-        valid_label_ids = [lbl for lbl in collated_batch["labels"][i].tolist() if lbl != -100]
-        decoded_labels = tokenizer.decode(valid_label_ids)
-        print("\nDECODED LABELS (What the loss is calculated on):")
-        print(repr(decoded_labels))
-    print("="*50 + "\n")
-
     output_dir = f"./outputs/{args.experiment_name}"
+    
+    # --- MEMORY FIX 3: Drastically lower batch size, increase accumulation ---
     training_args = TrainingArguments(
         output_dir=output_dir,
-        per_device_train_batch_size=8,
-        per_device_eval_batch_size=8,
-        gradient_accumulation_steps=4,
+        per_device_train_batch_size=2,       
+        per_device_eval_batch_size=2,        
+        gradient_accumulation_steps=16,      
         learning_rate=args.lr,
         num_train_epochs=args.epochs,
         run_name=args.experiment_name,
@@ -222,7 +203,6 @@ def main():
     trainer.train()
     trainer.save_model(output_dir)
 
-    # Post-Training Evaluation
     print("\n--- STEP 5: Post-Training Evaluation ---")
     evaluate_test_set(model, test_ds, tokenizer, processor, prefix="Post-Train")
 

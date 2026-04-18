@@ -25,8 +25,8 @@ export HF_HUB_CACHE="/data/user_data/bsood/.hf_cache/hub"
 export HF_DATASETS_CACHE="/data/user_data/bsood/.hf_cache/datasets"
 
 # Path to the specific checkpoint you requested
-PROJECTOR_WEIGHTS="/home/bsood/Multimodal-Machine-Learning-Project/outputs/chartqa_finetune_mihika_projector_1e4/projector.pt"
-EXPERIMENT_NAME="chartqa_ocr_finetune_mihika_projector_1e4"
+PROJECTOR_WEIGHTS="/home/bsood/Multimodal-Machine-Learning-Project/outputs/bhavesh-epoch3 checkpoint-1770/projector.pt"
+EXPERIMENT_NAME="chartqa_ocr_bhavesh_best_eval"
 
 echo "=================================================="
 echo "Starting ChartQA EasyOCR Pipeline"
