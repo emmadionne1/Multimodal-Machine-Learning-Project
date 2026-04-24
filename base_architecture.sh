@@ -24,8 +24,8 @@ case "$SLURM_ARRAY_TASK_ID" in
     ;;
   # CHARTQA RUN
   3)
-    LOG_NAME="chartqa_direct"
-    CMD=(python3 base_architecture.py --experiment_name chartqa_direct --epochs 5 --lr 5e-4 --task chartqa)
+    LOG_NAME="chartqa_llava_direct"
+    CMD=(python3 base_architecture.py --experiment_name chartqa_llava_direct --epochs 5 --lr 5e-3 --task chartqa --trained_weights outputs/1e4_a80_mediumishish_batch_1e/checkpoint-5233/projector.pt --per_device_train_batch_size 8)
     ;;
   # BATCH SIZE 12 RUNS ACROSS LRS
   4) 
@@ -71,6 +71,16 @@ case "$SLURM_ARRAY_TASK_ID" in
     # sbatch --array=8 --constrain=A100_80GB base_architecture.sh
     CMD=(python3 base_architecture.py --experiment_name 7e3_a80_mediumishish_batch --lr 7e-3 --epochs 2 --task pretrainn --per_device_train_batch_size 24)
     ;;
+  21)
+    LOG_NAME="1e3_a80_mediumishish_batch_1e"
+    # sbatch --array=21 --constrain=A100_80GB base_architecture.sh
+    CMD=(python3 base_architecture.py --experiment_name 1e3_a80_mediumishish_batch_1e --lr 1e-3 --epochs 1 --task pretrain --per_device_train_batch_size 24)
+    ;;
+  23)
+    LOG_NAME="1e4_a80_mediumishish_batch_1e"
+    # sbatch --array=23 --constrain=A100_80GB base_architecture.sh
+    CMD=(python3 base_architecture.py --experiment_name 1e4_a80_mediumishish_batch_1e --lr 1e-4 --epochs 1 --task pretrain --per_device_train_batch_size 24)
+    ;;
   # CHART SUMMARIZATION
   12)
     # sbatch --array=12 --constrain=A100_80GB base_architecture.sh
@@ -96,6 +106,18 @@ case "$SLURM_ARRAY_TASK_ID" in
     CMD=(python3 base_architecture.py --experiment_name summarization_7e3 --lr 7e-3 --task summarization 
           --trained_weights outputs/7e3_a80_mediumishish_batch.pt --per_device_train_batch_size 8 --gradient_accumulation_steps 2)
     ;;
+  22)
+    # sbatch --array=22 --constrain=A100_80GB base_architecture.sh
+    LOG_NAME="summarization_1e4_1e4_1e"
+    CMD=(python3 base_architecture.py --experiment_name summarization_1e4_1e4_1e --lr 1e-4 --task summarization 
+          --trained_weights outputs/1e4_a80_mediumishish_batch_1e/checkpoint-5233/projector.pt --per_device_train_batch_size 8 --gradient_accumulation_steps 2)
+    ;;
+  24)
+    # sbatch --array=24 --constrain=A100_80GB base_architecture.sh
+    LOG_NAME="summarization_1e3_1e4_1e"
+    CMD=(python3 base_architecture.py --experiment_name summarization_1e3_1e4_1e --lr 1e-3 --task summarization 
+          --trained_weights outputs/1e4_a80_mediumishish_batch_1e/checkpoint-5233/projector.pt --per_device_train_batch_size 8 --gradient_accumulation_steps 2)
+    ;;
   # CHART TO TABLE
   15)
     # sbatch --array=15 --constrain=A100_80GB --time=2:00:00 base_architecture.sh
@@ -110,10 +132,16 @@ case "$SLURM_ARRAY_TASK_ID" in
           --trained_weights outputs/summarization_7e3.pt --per_device_train_batch_size 4 --gradient_accumulation_steps 4)
     ;;
   19)
-    # sbatch --array=20 --constrain=A100_80GB --time=2:00:00 base_architecture.sh
+    # sbatch --array=19 --constrain=A100_80GB --time=2:00:00 base_architecture.sh
     LOG_NAME="table_7e3"
     CMD=(python3 base_architecture.py --experiment_name table_7e3 --lr 7e-3 --epochs 3 --task table --max_new_tokens 1000
           --trained_weights outputs/summarization_7e3.pt --per_device_train_batch_size 4 --gradient_accumulation_steps 4)
+    ;;
+  # CHARTQA
+  20)
+    # sbatch --array=20 --constrain=A100_80GB --time=5:00:00 base_architecture.sh
+    LOG_NAME="chartqa_1e4"
+    CMD=(python3 base_architecture.py --experiment_name chartqa_1e4 --epochs 3 --lr 1e-4 --task chartqa --trained_weights outputs/table_7e3.pt)
     ;;
   *)
     echo "Invalid SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"

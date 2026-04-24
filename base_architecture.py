@@ -28,7 +28,6 @@ from transformers import (
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR, get_last_checkpoint
 from transformers.trainer_callback import TrainerState
 from baselines.multimodal_prompting_baselines import is_answer_correct_relaxed
-from sklearn.metrics import f1_score
 import torch
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
