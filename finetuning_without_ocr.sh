@@ -69,6 +69,18 @@ case "$SLURM_ARRAY_TASK_ID" in
     LOG_NAME="summarization_small_1e_1e4"
     CMD=(python3 finetuning_without_ocr.py --experiment_name summarization_small_1e_1e4 --projector_weights outputs/summarization_1e4_1e4_1e/checkpoint-2696/projector.pt --run_ocr_eval --per_device_train_batch_size 8)
     ;;
+  15) 
+    LOG_NAME="summarization_small_actual_1e"
+    CMD=(python3 finetuning_without_ocr.py --experiment_name summarization_small_actual_1e --projector_weights outputs/summarization_1e4_actual_1e/checkpoint-1348/projector.pt --run_ocr_eval --per_device_train_batch_size 8)
+    ;;
+  16) 
+    LOG_NAME="table_small_1e"
+    CMD=(python3 finetuning_without_ocr.py --experiment_name table_small_1e --projector_weights outputs/table_1e4_1e/checkpoint-56/projector.pt --run_ocr_eval --per_device_train_batch_size 8)
+    ;;
+  17) 
+    LOG_NAME="table_small_2e"
+    CMD=(python3 finetuning_without_ocr.py --experiment_name table_small_2e --projector_weights outputs/table_1e4_2e/checkpoint-112/projector.pt --run_ocr_eval --per_device_train_batch_size 8)
+    ;;
   *)
     echo "Invalid SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
     exit 1
